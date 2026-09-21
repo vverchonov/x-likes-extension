@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Likes</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header class="header">
+      <img class="mark" src="icons/icon32.png" alt="" width="32" height="32" />
+      <h1>Likes</h1>
+      <nav class="header-links">
+        <a id="x-link" href="https://x.com/your_handle" target="_blank" rel="noreferrer">X</a>
+        <a id="site-link" href="https://example.com" target="_blank" rel="noreferrer">Website</a>
+      </nav>
+    </header>
+    <div class="row">
+      <div>
+        <p class="label">Capture likes</p>
+        <p class="hint">Original posts only</p>
+      </div>
+      <button id="capture-toggle" type="button" role="switch" aria-checked="true" aria-label="Capture likes">
+        <span class="knob"></span>
+      </button>
+    </div>
+    <main id="timeline" class="timeline"></main>
+    <script src="popup.js"></script>
+  </body>
+</html>
