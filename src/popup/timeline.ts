@@ -1,36 +1,38 @@
 import { parseLikesResponse } from "../lib/likes.ts";
 import type { LikedPost, MediaItem } from "../lib/types.ts";
 
-export function mountTimeline(root: HTMLElement): void {
-  void refresh(root);
-  if (!hasExtensionRuntime()) return;
-  chrome.runtime.onMessage.addListener((message: unknown) => {
-    if (!message || typeof message !== "object") return;
-    if ((message as { type?: unknown }).type !== "likes-changed") return;
-    void refresh(root);
+export function mountTimeline(root: HTMLElement, refreshButton: HTMLButtonElement | null): void {
+  void refresh(root, refreshButton, false);
+  refreshButton?.addEventListener("click", () => {
+    void refresh(root, refreshButton, true);
   });
 }
 
 let requestId = 0;
 
-async function refresh(root: HTMLElement): Promise<void> {
+async function refresh(root: HTMLElement, refreshButton: HTMLButtonElement | null, force: boolean): Promise<void> {
   const id = ++requestId;
-  if (root.childElementCount === 0) renderStatus(root, "Loading");
+  if (refreshButton) refreshButton.disabled = true;
+  if (force || root.childElementCount === 0) renderStatus(root, "Loading");
 
-  const username = await signedInUsername();
-  if (id !== requestId) return;
-  if (!username) {
-    renderStatus(root, "Open X to load likes");
-    return;
-  }
+  try {
+    const username = await signedInUsername();
+    if (id !== requestId) return;
+    if (!username) {
+      renderStatus(root, "Open X to load likes");
+      return;
+    }
 
-  const likes = await loadLikes(username);
-  if (id !== requestId) return;
-  if (!likes) {
-    renderStatus(root, "Couldn't load likes");
-    return;
+    const likes = await loadLikes(username, force);
+    if (id !== requestId) return;
+    if (!likes) {
+      renderStatus(root, "Couldn't load likes");
+      return;
+    }
+    renderPosts(root, likes);
+  } finally {
+    if (id === requestId && refreshButton) refreshButton.disabled = false;
   }
-  renderPosts(root, likes);
 }
 
 async function signedInUsername(): Promise<string | null> {
@@ -48,9 +50,9 @@ async function signedInUsername(): Promise<string | null> {
   }
 }
 
-async function loadLikes(username: string): Promise<LikedPost[] | null> {
+async function loadLikes(username: string, force: boolean): Promise<LikedPost[] | null> {
   if (!hasExtensionRuntime()) return null;
-  const response: unknown = await chrome.runtime.sendMessage({ type: "load-likes", username });
+  const response: unknown = await chrome.runtime.sendMessage({ type: "load-likes", username, force });
   if (!response || typeof response !== "object") return null;
   const record = response as { ok?: unknown; likes?: unknown };
   if (record.ok !== true) return null;

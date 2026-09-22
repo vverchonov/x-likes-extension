@@ -1,8 +1,10 @@
 import { BE_ENDPOINT } from "./config.ts";
 import { isCaptureEnabled } from "./lib/capture.ts";
 import { httpsUrl } from "./lib/extract.ts";
-import { isLikedUsername, likesUrl, parseLikesResponse } from "./lib/likes.ts";
+import { isLikedUsername, likesUrl, parseLikesResponse, readLikesCache } from "./lib/likes.ts";
 import type { LikedPost, LikedPostPayload, MediaItem } from "./lib/types.ts";
+
+const LIKES_CACHE_KEY = "likesCache";
 
 chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) => {
   const payload = likedPostPayload(message);
@@ -11,9 +13,9 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) =
     return;
   }
 
-  const username = likesRequestUsername(message);
-  if (!username) return;
-  void loadLikes(username).then((response) => {
+  const request = likesRequest(message);
+  if (!request) return;
+  void loadLikes(request.username, request.force).then((response) => {
     sendResponse(response);
   });
   return true;
@@ -29,16 +31,29 @@ async function deliver(payload: LikedPostPayload): Promise<void> {
       return;
     }
   }
-  void chrome.runtime.sendMessage({ type: "likes-changed" }).catch(() => undefined);
+  await chrome.storage.local.remove(LIKES_CACHE_KEY);
 }
 
-async function loadLikes(username: string): Promise<{ ok: true; likes: LikedPost[] } | { ok: false }> {
+async function loadLikes(
+  username: string,
+  force: boolean,
+): Promise<{ ok: true; likes: LikedPost[] } | { ok: false }> {
+  if (!force) {
+    const stored = await chrome.storage.local.get(LIKES_CACHE_KEY);
+    const cached = readLikesCache(stored[LIKES_CACHE_KEY], username, Date.now());
+    if (cached) return { ok: true, likes: cached };
+  }
+
   try {
     const response = await fetch(likesUrl(BE_ENDPOINT, username), {
       headers: { accept: "application/json" },
     });
     if (!response.ok) return { ok: false };
-    return { ok: true, likes: parseLikesResponse(await response.json()) };
+    const likes = parseLikesResponse(await response.json());
+    await chrome.storage.local.set({
+      [LIKES_CACHE_KEY]: { username, fetchedAt: Date.now(), likes },
+    });
+    return { ok: true, likes };
   } catch (error) {
     console.error("Like list request failed", error);
     return { ok: false };
@@ -63,11 +78,11 @@ async function postOnce(payload: LikedPostPayload): Promise<boolean> {
   }
 }
 
-function likesRequestUsername(message: unknown): string | null {
+function likesRequest(message: unknown): { username: string; force: boolean } | null {
   if (!message || typeof message !== "object") return null;
   const record = message as Record<string, unknown>;
-  if (record.type !== "load-likes") return null;
-  return isLikedUsername(record.username) ? record.username : null;
+  if (record.type !== "load-likes" || !isLikedUsername(record.username)) return null;
+  return { username: record.username, force: record.force === true };
 }
 
 function likedPostPayload(message: unknown): LikedPostPayload | null {

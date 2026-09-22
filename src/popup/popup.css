@@ -58,15 +58,28 @@ h1 {
   margin-left: auto;
 }
 
-.header-links a {
+.header-links a,
+.header-links button {
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: var(--primary);
+  font: inherit;
   font-size: 15px;
   font-weight: 700;
   text-decoration: none;
+  cursor: pointer;
 }
 
-.header-links a:hover {
+.header-links a:hover,
+.header-links button:hover {
   text-decoration: underline;
+}
+
+.header-links button:disabled {
+  color: var(--muted);
+  text-decoration: none;
+  cursor: default;
 }
 
 .row {

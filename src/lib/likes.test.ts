@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { isLikedUsername, likesUrl, parseLikesResponse } from "./likes.ts";
+import { isLikedUsername, LIKES_CACHE_MS, likesUrl, parseLikesResponse, readLikesCache } from "./likes.ts";
 
 const like = {
   postId: "1",
@@ -51,6 +51,27 @@ describe("parseLikesResponse", () => {
   it("returns nothing when the payload is not a likes list", () => {
     assert.deepEqual(parseLikesResponse(null), []);
     assert.deepEqual(parseLikesResponse({ likes: "nope" }), []);
+  });
+});
+
+describe("readLikesCache", () => {
+  const now = Date.parse("2026-09-22T16:00:00.000Z");
+  const cache = {
+    username: "current_user",
+    fetchedAt: now - 30_000,
+    likes: [{ ...like, coinUrl: "https://pump.fun/coin/abc" }],
+  };
+
+  it("reuses a response from the last minute for the same account", () => {
+    const posts = readLikesCache(cache, "current_user", now);
+    assert.equal(posts?.[0]?.postId, "1");
+    assert.equal(posts?.[0]?.coinUrl, "https://pump.fun/coin/abc");
+  });
+
+  it("ignores a response that is a minute old or for another account", () => {
+    assert.equal(readLikesCache({ ...cache, fetchedAt: now - LIKES_CACHE_MS }, "current_user", now), null);
+    assert.equal(readLikesCache(cache, "other_user", now), null);
+    assert.equal(readLikesCache(null, "current_user", now), null);
   });
 });
 

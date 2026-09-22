@@ -3,12 +3,15 @@ import { mountTimeline } from "./timeline.ts";
 
 const toggle = document.querySelector("#capture-toggle");
 const timeline = document.querySelector("#timeline");
+const refresh = document.querySelector("#refresh");
 const xLink = document.querySelector("#x-link");
 const siteLink = document.querySelector("#site-link");
 
 if (xLink instanceof HTMLAnchorElement) xLink.href = X_PROFILE_URL;
 if (siteLink instanceof HTMLAnchorElement) siteLink.href = WEBSITE_URL;
-if (timeline instanceof HTMLElement) mountTimeline(timeline);
+if (timeline instanceof HTMLElement) {
+  mountTimeline(timeline, refresh instanceof HTMLButtonElement ? refresh : null);
+}
 
 if (toggle instanceof HTMLButtonElement) {
   void readEnabled().then((enabled) => {
