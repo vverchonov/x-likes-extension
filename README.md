@@ -17,6 +17,28 @@ Liking an original post on x.com or twitter.com sends this JSON to `BE_ENDPOINT`
 
 Replies are ignored. Unlikes are ignored. The popup switch turns capture off.
 
+The popup loads that account’s likes from the same URL with `GET`. It reads the signed-in handle from an open X tab, then requests:
+
+`GET {BE_ENDPOINT}?username={handle}`
+
+```json
+{
+  "likes": [
+    {
+      "postId": "123",
+      "username": "current_user",
+      "text": "post text or null",
+      "media": [{ "type": "image", "url": "https://..." }],
+      "url": "https://x.com/i/status/123",
+      "likedAt": "2026-09-21T19:20:00.000Z",
+      "coinUrl": "https://pump.fun/coin/abc"
+    }
+  ]
+}
+```
+
+`coinUrl` is the coin page when that like created a coin. `null` or a missing `coinUrl` means no coin, and the popup shows no coin link.
+
 ## Setup
 
 ```bash

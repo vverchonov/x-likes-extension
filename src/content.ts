@@ -82,8 +82,17 @@ function observationFor(postId: string): DomObservation | null {
   return recentArticles.get(postId) ?? null;
 }
 
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (!isUsernameRequest(message)) return;
+  sendResponse({ username: currentUsername() });
+});
+
 async function sendPayload(payload: LikedPostPayload): Promise<void> {
   await chrome.runtime.sendMessage({ type: "liked-post", payload });
+}
+
+function isUsernameRequest(message: unknown): boolean {
+  return Boolean(message) && typeof message === "object" && (message as { type?: unknown }).type === "current-username";
 }
 
 function currentUsername(): string | null {

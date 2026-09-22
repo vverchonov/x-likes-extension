@@ -1,50 +1,81 @@
-import { LIKED_POSTS_KEY, parseLikedPosts } from "../lib/history.ts";
-import type { LikedPostPayload, MediaItem } from "../lib/types.ts";
+import { parseLikesResponse } from "../lib/likes.ts";
+import type { LikedPost, MediaItem } from "../lib/types.ts";
 
 export function mountTimeline(root: HTMLElement): void {
-  void readLikedPosts().then((posts) => {
-    renderPosts(root, posts);
+  void refresh(root);
+  if (!hasExtensionRuntime()) return;
+  chrome.runtime.onMessage.addListener((message: unknown) => {
+    if (!message || typeof message !== "object") return;
+    if ((message as { type?: unknown }).type !== "likes-changed") return;
+    void refresh(root);
   });
-  watchLikedPosts(root);
 }
 
-async function readLikedPosts(): Promise<LikedPostPayload[]> {
-  if (hasExtensionStorage()) {
-    const stored = await chrome.storage.local.get(LIKED_POSTS_KEY);
-    return parseLikedPosts(stored[LIKED_POSTS_KEY]);
-  }
-  return readPreviewPosts();
-}
+let requestId = 0;
 
-function watchLikedPosts(root: HTMLElement): void {
-  if (hasExtensionStorage()) {
-    chrome.storage.onChanged.addListener((changes, area) => {
-      if (area !== "local" || !(LIKED_POSTS_KEY in changes)) return;
-      renderPosts(root, parseLikedPosts(changes[LIKED_POSTS_KEY]?.newValue));
-    });
+async function refresh(root: HTMLElement): Promise<void> {
+  const id = ++requestId;
+  if (root.childElementCount === 0) renderStatus(root, "Loading");
+
+  const username = await signedInUsername();
+  if (id !== requestId) return;
+  if (!username) {
+    renderStatus(root, "Open X to load likes");
     return;
   }
 
-  window.addEventListener("storage", (event) => {
-    if (event.key !== LIKED_POSTS_KEY) return;
-    renderPosts(root, readPreviewPosts());
-  });
+  const likes = await loadLikes(username);
+  if (id !== requestId) return;
+  if (!likes) {
+    renderStatus(root, "Couldn't load likes");
+    return;
+  }
+  renderPosts(root, likes);
 }
 
-function renderPosts(root: HTMLElement, posts: LikedPostPayload[]): void {
+async function signedInUsername(): Promise<string | null> {
+  if (!hasExtensionTabs()) return null;
+  const tabs = await chrome.tabs.query({ url: ["https://x.com/*", "https://twitter.com/*"] });
+  const tab = tabs.find((item) => item.active) ?? tabs[0];
+  if (tab?.id == null) return null;
+  try {
+    const response: unknown = await chrome.tabs.sendMessage(tab.id, { type: "current-username" });
+    if (!response || typeof response !== "object") return null;
+    const username = (response as { username?: unknown }).username;
+    return typeof username === "string" && username.length > 0 ? username : null;
+  } catch {
+    return null;
+  }
+}
+
+async function loadLikes(username: string): Promise<LikedPost[] | null> {
+  if (!hasExtensionRuntime()) return null;
+  const response: unknown = await chrome.runtime.sendMessage({ type: "load-likes", username });
+  if (!response || typeof response !== "object") return null;
+  const record = response as { ok?: unknown; likes?: unknown };
+  if (record.ok !== true) return null;
+  return parseLikesResponse({ likes: record.likes });
+}
+
+function renderPosts(root: HTMLElement, posts: LikedPost[]): void {
   root.replaceChildren();
   if (posts.length === 0) {
-    const empty = document.createElement("p");
-    empty.className = "empty";
-    empty.textContent = "No likes yet";
-    root.append(empty);
+    renderStatus(root, "No likes yet");
     return;
   }
 
   for (const post of posts) root.append(renderPost(post));
 }
 
-function renderPost(post: LikedPostPayload): HTMLElement {
+function renderStatus(root: HTMLElement, text: string): void {
+  root.replaceChildren();
+  const empty = document.createElement("p");
+  empty.className = "empty";
+  empty.textContent = text;
+  root.append(empty);
+}
+
+function renderPost(post: LikedPost): HTMLElement {
   const article = document.createElement("article");
   article.className = "post";
 
@@ -73,14 +104,24 @@ function renderPost(post: LikedPostPayload): HTMLElement {
   time.dateTime = post.likedAt;
   time.textContent = formatLikedAt(post.likedAt);
   who.append(account, time);
-  const link = document.createElement("a");
-  link.href = post.url;
-  link.target = "_blank";
-  link.rel = "noreferrer";
-  link.textContent = "View post";
-  meta.append(who, link);
+
+  const links = document.createElement("div");
+  links.className = "links";
+  links.append(postLink(post.url, "View post"));
+  if (post.coinUrl) links.append(postLink(post.coinUrl, "View coin"));
+
+  meta.append(who, links);
   article.append(meta);
   return article;
+}
+
+function postLink(href: string, label: string): HTMLAnchorElement {
+  const link = document.createElement("a");
+  link.href = href;
+  link.target = "_blank";
+  link.rel = "noreferrer";
+  link.textContent = label;
+  return link;
 }
 
 function renderMedia(item: MediaItem): HTMLElement {
@@ -110,16 +151,10 @@ function formatLikedAt(value: string): string {
   return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date);
 }
 
-function readPreviewPosts(): LikedPostPayload[] {
-  const raw = localStorage.getItem(LIKED_POSTS_KEY);
-  if (!raw) return [];
-  try {
-    return parseLikedPosts(JSON.parse(raw) as unknown);
-  } catch {
-    return [];
-  }
+function hasExtensionRuntime(): boolean {
+  return typeof chrome !== "undefined" && Boolean(chrome.runtime?.sendMessage);
 }
 
-function hasExtensionStorage(): boolean {
-  return typeof chrome !== "undefined" && Boolean(chrome.storage?.local);
+function hasExtensionTabs(): boolean {
+  return typeof chrome !== "undefined" && Boolean(chrome.tabs?.query) && Boolean(chrome.tabs?.sendMessage);
 }

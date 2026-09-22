@@ -19,6 +19,10 @@ export type LikedPostPayload = {
   likedAt: string;
 };
 
+export type LikedPost = LikedPostPayload & {
+  coinUrl: string | null;
+};
+
 export type DomCaptureInput = {
   postId: string | null;
   hasReplyingTo: boolean;

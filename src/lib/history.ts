@@ -12,13 +12,13 @@ export function parseLikedPosts(value: unknown): LikedPostPayload[] {
   if (!Array.isArray(value)) return [];
   const posts: LikedPostPayload[] = [];
   for (const entry of value) {
-    const post = asLikedPost(entry);
+    const post = parseLikedPost(entry);
     if (post) posts.push(post);
   }
   return posts;
 }
 
-function asLikedPost(value: unknown): LikedPostPayload | null {
+export function parseLikedPost(value: unknown): LikedPostPayload | null {
   if (!value || typeof value !== "object") return null;
   const record = value as Record<string, unknown>;
   if (

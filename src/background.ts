@@ -1,27 +1,47 @@
 import { BE_ENDPOINT } from "./config.ts";
 import { isCaptureEnabled } from "./lib/capture.ts";
-import { LIKED_POSTS_KEY, parseLikedPosts, upsertLikedPost } from "./lib/history.ts";
-import type { LikedPostPayload, MediaItem } from "./lib/types.ts";
+import { isLikedUsername, likesUrl, parseLikesResponse } from "./lib/likes.ts";
+import type { LikedPost, LikedPostPayload, MediaItem } from "./lib/types.ts";
 
-chrome.runtime.onMessage.addListener((message: unknown) => {
+chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) => {
   const payload = likedPostPayload(message);
-  if (!payload) return;
-  void deliver(payload);
+  if (payload) {
+    void deliver(payload);
+    return;
+  }
+
+  const username = likesRequestUsername(message);
+  if (!username) return;
+  void loadLikes(username).then((response) => {
+    sendResponse(response);
+  });
+  return true;
 });
 
 async function deliver(payload: LikedPostPayload): Promise<void> {
   if (!(await isCaptureEnabled())) return;
-  await rememberLikedPost(payload);
   const delivered = await postOnce(payload);
-  if (delivered) return;
-  const retried = await postOnce(payload);
-  if (!retried) console.error("Failed to send liked post", payload.postId);
+  if (!delivered) {
+    const retried = await postOnce(payload);
+    if (!retried) {
+      console.error("Failed to send liked post", payload.postId);
+      return;
+    }
+  }
+  void chrome.runtime.sendMessage({ type: "likes-changed" }).catch(() => undefined);
 }
 
-async function rememberLikedPost(payload: LikedPostPayload): Promise<void> {
-  const stored = await chrome.storage.local.get(LIKED_POSTS_KEY);
-  const posts = upsertLikedPost(parseLikedPosts(stored[LIKED_POSTS_KEY]), payload);
-  await chrome.storage.local.set({ [LIKED_POSTS_KEY]: posts });
+async function loadLikes(username: string): Promise<{ ok: true; likes: LikedPost[] } | { ok: false }> {
+  try {
+    const response = await fetch(likesUrl(BE_ENDPOINT, username), {
+      headers: { accept: "application/json" },
+    });
+    if (!response.ok) return { ok: false };
+    return { ok: true, likes: parseLikesResponse(await response.json()) };
+  } catch (error) {
+    console.error("Like list request failed", error);
+    return { ok: false };
+  }
 }
 
 async function postOnce(payload: LikedPostPayload): Promise<boolean> {
@@ -40,6 +60,13 @@ async function postOnce(payload: LikedPostPayload): Promise<boolean> {
     console.error("Like endpoint request failed", error);
     return false;
   }
+}
+
+function likesRequestUsername(message: unknown): string | null {
+  if (!message || typeof message !== "object") return null;
+  const record = message as Record<string, unknown>;
+  if (record.type !== "load-likes") return null;
+  return isLikedUsername(record.username) ? record.username : null;
 }
 
 function likedPostPayload(message: unknown): LikedPostPayload | null {

@@ -185,6 +185,13 @@ button[role="switch"][aria-checked="true"] .knob {
   font-weight: 700;
 }
 
+.links {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 12px;
+}
+
 time {
   color: var(--muted);
   font-size: 13px;
