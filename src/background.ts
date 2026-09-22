@@ -52,9 +52,15 @@ function likedPostPayload(message: unknown): LikedPostPayload | null {
 function asPayload(value: unknown): LikedPostPayload | null {
   if (!value || typeof value !== "object") return null;
   const record = value as Record<string, unknown>;
-  if (typeof record.postId !== "string" || typeof record.url !== "string" || typeof record.likedAt !== "string") {
+  if (
+    typeof record.postId !== "string" ||
+    typeof record.username !== "string" ||
+    typeof record.url !== "string" ||
+    typeof record.likedAt !== "string"
+  ) {
     return null;
   }
+  if (!record.username) return null;
   if (!(record.text === null || typeof record.text === "string")) return null;
   if (!Array.isArray(record.media)) return null;
 
@@ -68,6 +74,7 @@ function asPayload(value: unknown): LikedPostPayload | null {
 
   return {
     postId: record.postId,
+    username: record.username,
     text: record.text,
     media,
     url: record.url,

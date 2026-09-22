@@ -1,6 +1,13 @@
 import { isCaptureEnabled } from "./lib/capture.ts";
 import { findArticleByStatusId, observeArticle, type DomObservation } from "./lib/dom.ts";
-import { decideDomCapture, payloadFromCached, postUrl, statusIdFromHref } from "./lib/extract.ts";
+import {
+  decideDomCapture,
+  payloadFromCached,
+  postUrl,
+  statusIdFromHref,
+  usernameFromAccountText,
+  usernameFromProfileHref,
+} from "./lib/extract.ts";
 import type { CachedTweet, LikedPostPayload, MediaItem } from "./lib/types.ts";
 import { PAGE_MESSAGE_SOURCE } from "./lib/types.ts";
 
@@ -30,10 +37,13 @@ window.addEventListener("message", (event) => {
 async function onFavorite(tweetId: string, tweetValue: unknown): Promise<void> {
   if (!(await isCaptureEnabled())) return;
 
+  const username = currentUsername();
+  if (!username) return;
+
   const tweet = readCachedTweet(tweetValue);
   if (tweet && tweet.postId === tweetId) {
     if (tweet.isReply) return;
-    await sendPayload(payloadFromCached(tweet, new Date().toISOString()));
+    await sendPayload(payloadFromCached(tweet, new Date().toISOString(), username));
     return;
   }
 
@@ -52,6 +62,7 @@ async function onFavorite(tweetId: string, tweetValue: unknown): Promise<void> {
     case "send":
       await sendPayload({
         postId: decision.postId,
+        username,
         text: observation.text,
         media: observation.media,
         url: postUrl(decision.postId),
@@ -73,6 +84,16 @@ function observationFor(postId: string): DomObservation | null {
 
 async function sendPayload(payload: LikedPostPayload): Promise<void> {
   await chrome.runtime.sendMessage({ type: "liked-post", payload });
+}
+
+function currentUsername(): string | null {
+  const profile = document.querySelector('a[data-testid="AppTabBar_Profile_Link"]');
+  if (profile instanceof HTMLAnchorElement) {
+    const handle = usernameFromProfileHref(profile.href);
+    if (handle) return handle;
+  }
+  const switcher = document.querySelector('[data-testid="SideNav_AccountSwitcher_Button"]');
+  return usernameFromAccountText(switcher?.textContent ?? "");
 }
 
 function likeButtonFromEvent(event: Event): HTMLElement | null {

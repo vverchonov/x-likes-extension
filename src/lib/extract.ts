@@ -59,9 +59,49 @@ export function parseFavoriteTweetId(body: string): string | null {
   }
 }
 
-export function payloadFromCached(tweet: CachedTweet, likedAt: string): LikedPostPayload {
+const HANDLE = /^[A-Za-z0-9_]{1,15}$/;
+
+const RESERVED_PATHS = new Set([
+  "home",
+  "explore",
+  "notifications",
+  "messages",
+  "settings",
+  "i",
+  "compose",
+  "search",
+  "jobs",
+  "communities",
+  "premium",
+  "login",
+  "signup",
+  "tos",
+  "privacy",
+]);
+
+export function usernameFromProfileHref(href: string): string | null {
+  try {
+    const segment = new URL(href, "https://x.com").pathname.split("/").filter(Boolean)[0];
+    return usernameFromSegment(segment);
+  } catch {
+    return null;
+  }
+}
+
+export function usernameFromAccountText(text: string): string | null {
+  const match = text.match(/@([A-Za-z0-9_]{1,15})\b/);
+  return usernameFromSegment(match?.[1]);
+}
+
+function usernameFromSegment(segment: string | undefined): string | null {
+  if (!segment || !HANDLE.test(segment) || RESERVED_PATHS.has(segment.toLowerCase())) return null;
+  return segment;
+}
+
+export function payloadFromCached(tweet: CachedTweet, likedAt: string, username: string): LikedPostPayload {
   return {
     postId: tweet.postId,
+    username,
     text: tweet.text,
     media: tweet.media,
     url: postUrl(tweet.postId),

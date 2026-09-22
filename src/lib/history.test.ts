@@ -6,6 +6,7 @@ import type { LikedPostPayload } from "./types.ts";
 function post(postId: string, text: string): LikedPostPayload {
   return {
     postId,
+    username: "current_user",
     text,
     media: [],
     url: `https://x.com/i/status/${postId}`,
@@ -41,7 +42,12 @@ describe("upsertLikedPost", () => {
 
 describe("parseLikedPosts", () => {
   it("drops entries that are not liked posts", () => {
-    const posts = parseLikedPosts([post("1", "kept"), { postId: "2" }, null, "nope"]);
+    const posts = parseLikedPosts([
+      post("1", "kept"),
+      { postId: "2", text: "missing account", media: [], url: "https://x.com/i/status/2", likedAt: "2026-09-21T19:40:00.000Z" },
+      null,
+      "nope",
+    ]);
     assert.deepEqual(posts, [post("1", "kept")]);
   });
 });

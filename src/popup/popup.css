@@ -172,6 +172,19 @@ button[role="switch"][aria-checked="true"] .knob {
   margin-top: 8px;
 }
 
+.who {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.account {
+  color: var(--foreground);
+  font-size: 13px;
+  font-weight: 700;
+}
+
 time {
   color: var(--muted);
   font-size: 13px;

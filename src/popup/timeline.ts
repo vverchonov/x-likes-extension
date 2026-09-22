@@ -64,15 +64,21 @@ function renderPost(post: LikedPostPayload): HTMLElement {
 
   const meta = document.createElement("div");
   meta.className = "meta";
+  const who = document.createElement("div");
+  who.className = "who";
+  const account = document.createElement("span");
+  account.className = "account";
+  account.textContent = `@${post.username}`;
   const time = document.createElement("time");
   time.dateTime = post.likedAt;
   time.textContent = formatLikedAt(post.likedAt);
+  who.append(account, time);
   const link = document.createElement("a");
   link.href = post.url;
   link.target = "_blank";
   link.rel = "noreferrer";
   link.textContent = "View post";
-  meta.append(time, link);
+  meta.append(who, link);
   article.append(meta);
   return article;
 }

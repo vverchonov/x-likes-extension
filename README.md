@@ -7,6 +7,7 @@ Liking an original post on x.com or twitter.com sends this JSON to `BE_ENDPOINT`
 ```json
 {
   "postId": "123",
+  "username": "current_user",
   "text": "post text or null",
   "media": [{ "type": "image", "url": "https://..." }],
   "url": "https://x.com/i/status/123",
