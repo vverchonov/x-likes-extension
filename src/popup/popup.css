@@ -58,28 +58,15 @@ h1 {
   margin-left: auto;
 }
 
-.header-links a,
-.header-links button {
-  padding: 0;
-  border: 0;
-  background: transparent;
+.header-links a {
   color: var(--primary);
-  font: inherit;
   font-size: 15px;
   font-weight: 700;
   text-decoration: none;
-  cursor: pointer;
 }
 
-.header-links a:hover,
-.header-links button:hover {
+.header-links a:hover {
   text-decoration: underline;
-}
-
-.header-links button:disabled {
-  color: var(--muted);
-  text-decoration: none;
-  cursor: default;
 }
 
 .row {
@@ -103,6 +90,38 @@ h1 {
   color: var(--muted);
   font-size: 13px;
   line-height: 16px;
+}
+
+.row-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+#refresh {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+#refresh:hover {
+  background: #16181c;
+  color: var(--foreground);
+}
+
+#refresh:disabled {
+  background: transparent;
+  color: var(--switch-off);
+  cursor: default;
 }
 
 button[role="switch"] {
