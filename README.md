@@ -8,6 +8,7 @@ Liking an original post on x.com or twitter.com sends this JSON to `BE_ENDPOINT`
 {
   "postId": "123",
   "username": "current_user",
+  "avatarUrl": "https://pbs.twimg.com/profile_images/1/avatar.jpg",
   "text": "post text or null",
   "media": [{ "type": "image", "url": "https://..." }],
   "url": "https://x.com/i/status/123",
@@ -27,6 +28,7 @@ The popup loads that account’s likes from the same URL with `GET`. It reads th
     {
       "postId": "123",
       "username": "current_user",
+      "avatarUrl": "https://pbs.twimg.com/profile_images/1/avatar.jpg",
       "text": "post text or null",
       "media": [{ "type": "image", "url": "https://..." }],
       "url": "https://x.com/i/status/123",
@@ -37,7 +39,7 @@ The popup loads that account’s likes from the same URL with `GET`. It reads th
 }
 ```
 
-`coinUrl` is the coin page when that like created a coin. `null` or a missing `coinUrl` means no coin, and the popup shows no coin link.
+`coinUrl` is the coin page when that like created a coin. `null` or a missing `coinUrl` means no coin, and the popup shows no coin link. `avatarUrl` is the signed-in account’s profile image. `null` means that image was not on the page.
 
 ## Setup
 

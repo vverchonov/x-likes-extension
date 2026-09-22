@@ -1,3 +1,4 @@
+import { httpsUrl } from "./extract.ts";
 import type { LikedPostPayload, MediaItem } from "./types.ts";
 
 export const LIKED_POSTS_KEY = "likedPosts";
@@ -44,6 +45,7 @@ export function parseLikedPost(value: unknown): LikedPostPayload | null {
   return {
     postId: record.postId,
     username: record.username,
+    avatarUrl: httpsUrl(record.avatarUrl),
     text: record.text,
     media,
     url: record.url,

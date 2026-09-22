@@ -179,6 +179,13 @@ button[role="switch"][aria-checked="true"] .knob {
   min-width: 0;
 }
 
+.avatar {
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  object-fit: cover;
+}
+
 .account {
   color: var(--foreground);
   font-size: 13px;

@@ -5,6 +5,7 @@ import { isLikedUsername, likesUrl, parseLikesResponse } from "./likes.ts";
 const like = {
   postId: "1",
   username: "current_user",
+  avatarUrl: null,
   text: "Hello",
   media: [],
   url: "https://x.com/i/status/1",

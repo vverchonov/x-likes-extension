@@ -7,6 +7,7 @@ function post(postId: string, text: string): LikedPostPayload {
   return {
     postId,
     username: "current_user",
+    avatarUrl: null,
     text,
     media: [],
     url: `https://x.com/i/status/${postId}`,

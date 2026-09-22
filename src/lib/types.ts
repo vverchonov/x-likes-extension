@@ -13,6 +13,7 @@ export type CachedTweet = {
 export type LikedPostPayload = {
   postId: string;
   username: string;
+  avatarUrl: string | null;
   text: string | null;
   media: MediaItem[];
   url: string;

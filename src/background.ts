@@ -1,5 +1,6 @@
 import { BE_ENDPOINT } from "./config.ts";
 import { isCaptureEnabled } from "./lib/capture.ts";
+import { httpsUrl } from "./lib/extract.ts";
 import { isLikedUsername, likesUrl, parseLikesResponse } from "./lib/likes.ts";
 import type { LikedPost, LikedPostPayload, MediaItem } from "./lib/types.ts";
 
@@ -102,6 +103,7 @@ function asPayload(value: unknown): LikedPostPayload | null {
   return {
     postId: record.postId,
     username: record.username,
+    avatarUrl: httpsUrl(record.avatarUrl),
     text: record.text,
     media,
     url: record.url,

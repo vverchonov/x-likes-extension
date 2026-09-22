@@ -4,6 +4,8 @@ import {
   decideDomCapture,
   payloadFromCached,
   postUrl,
+  profileImageUrl,
+  profileImageUrlFromStyle,
   statusIdFromHref,
   usernameFromAccountText,
   usernameFromProfileHref,
@@ -37,13 +39,13 @@ window.addEventListener("message", (event) => {
 async function onFavorite(tweetId: string, tweetValue: unknown): Promise<void> {
   if (!(await isCaptureEnabled())) return;
 
-  const username = currentUsername();
-  if (!username) return;
+  const account = currentAccount();
+  if (!account) return;
 
   const tweet = readCachedTweet(tweetValue);
   if (tweet && tweet.postId === tweetId) {
     if (tweet.isReply) return;
-    await sendPayload(payloadFromCached(tweet, new Date().toISOString(), username));
+    await sendPayload(payloadFromCached(tweet, new Date().toISOString(), account.username, account.avatarUrl));
     return;
   }
 
@@ -62,7 +64,8 @@ async function onFavorite(tweetId: string, tweetValue: unknown): Promise<void> {
     case "send":
       await sendPayload({
         postId: decision.postId,
-        username,
+        username: account.username,
+        avatarUrl: account.avatarUrl,
         text: observation.text,
         media: observation.media,
         url: postUrl(decision.postId),
@@ -84,7 +87,8 @@ function observationFor(postId: string): DomObservation | null {
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (!isUsernameRequest(message)) return;
-  sendResponse({ username: currentUsername() });
+  const account = currentAccount();
+  sendResponse({ username: account?.username ?? null });
 });
 
 async function sendPayload(payload: LikedPostPayload): Promise<void> {
@@ -95,14 +99,30 @@ function isUsernameRequest(message: unknown): boolean {
   return Boolean(message) && typeof message === "object" && (message as { type?: unknown }).type === "current-username";
 }
 
-function currentUsername(): string | null {
+function currentAccount(): { username: string; avatarUrl: string | null } | null {
   const profile = document.querySelector('a[data-testid="AppTabBar_Profile_Link"]');
-  if (profile instanceof HTMLAnchorElement) {
-    const handle = usernameFromProfileHref(profile.href);
-    if (handle) return handle;
-  }
   const switcher = document.querySelector('[data-testid="SideNav_AccountSwitcher_Button"]');
-  return usernameFromAccountText(switcher?.textContent ?? "");
+  const fromProfile = profile instanceof HTMLAnchorElement ? usernameFromProfileHref(profile.href) : null;
+  const username = fromProfile ?? usernameFromAccountText(switcher?.textContent ?? "");
+  if (!username) return null;
+  return {
+    username,
+    avatarUrl: avatarWithin(switcher) ?? avatarWithin(profile),
+  };
+}
+
+function avatarWithin(root: Element | null): string | null {
+  if (!root) return null;
+  const image = root.querySelector("img");
+  if (image instanceof HTMLImageElement) {
+    const url = profileImageUrl(image.currentSrc || image.src);
+    if (url) return url;
+  }
+  for (const node of root.querySelectorAll<HTMLElement>("[style]")) {
+    const url = profileImageUrlFromStyle(node.getAttribute("style") ?? "");
+    if (url) return url;
+  }
+  return null;
 }
 
 function likeButtonFromEvent(event: Event): HTMLElement | null {

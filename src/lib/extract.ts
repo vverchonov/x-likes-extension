@@ -98,10 +98,25 @@ function usernameFromSegment(segment: string | undefined): string | null {
   return segment;
 }
 
-export function payloadFromCached(tweet: CachedTweet, likedAt: string, username: string): LikedPostPayload {
+export function profileImageUrl(value: unknown): string | null {
+  return httpsUrl(value);
+}
+
+export function profileImageUrlFromStyle(style: string): string | null {
+  const match = /url\(\s*["']?(https:\/\/[^"')]+)["']?\s*\)/.exec(style);
+  return httpsUrl(match?.[1]);
+}
+
+export function payloadFromCached(
+  tweet: CachedTweet,
+  likedAt: string,
+  username: string,
+  avatarUrl: string | null,
+): LikedPostPayload {
   return {
     postId: tweet.postId,
     username,
+    avatarUrl,
     text: tweet.text,
     media: tweet.media,
     url: postUrl(tweet.postId),

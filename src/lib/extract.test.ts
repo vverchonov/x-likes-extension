@@ -8,6 +8,8 @@ import {
   parseFavoriteTweetId,
   payloadFromCached,
   preferOriginalImage,
+  profileImageUrl,
+  profileImageUrlFromStyle,
   shouldHarvestTweets,
   usernameFromAccountText,
   usernameFromProfileHref,
@@ -153,9 +155,10 @@ describe("payloadFromCached", () => {
   it("builds the backend payload", () => {
     const [tweet] = collectTweets(originalPost);
     assert.ok(tweet);
-    assert.deepEqual(payloadFromCached(tweet, "2026-09-21T19:20:00.000Z", "current_user"), {
+    assert.deepEqual(payloadFromCached(tweet, "2026-09-21T19:20:00.000Z", "current_user", null), {
       postId: "100",
       username: "current_user",
+      avatarUrl: null,
       text: "Hello from a post",
       media: [
         { type: "image", url: "https://pbs.twimg.com/media/abc.jpg?name=orig" },
@@ -175,6 +178,20 @@ describe("usernameFromProfileHref", () => {
     assert.equal(usernameFromProfileHref("https://x.com/explore"), null);
     assert.equal(usernameFromAccountText("Ada @current_user"), "current_user");
     assert.equal(usernameFromAccountText("no handle here"), null);
+  });
+});
+
+describe("profileImageUrl", () => {
+  it("keeps an https profile image and drops anything else", () => {
+    const image = "https://pbs.twimg.com/profile_images/1/avatar_normal.jpg";
+    assert.equal(profileImageUrl(image), image);
+    assert.equal(profileImageUrl("blob:https://x.com/123"), null);
+    assert.equal(profileImageUrl(null), null);
+    assert.equal(
+      profileImageUrlFromStyle(`background-image: url("${image}")`),
+      image,
+    );
+    assert.equal(profileImageUrlFromStyle("background-image: none"), null);
   });
 });
 

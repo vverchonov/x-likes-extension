@@ -97,6 +97,13 @@ function renderPost(post: LikedPost): HTMLElement {
   meta.className = "meta";
   const who = document.createElement("div");
   who.className = "who";
+  if (post.avatarUrl) {
+    const avatar = document.createElement("img");
+    avatar.className = "avatar";
+    avatar.src = post.avatarUrl;
+    avatar.alt = "";
+    who.append(avatar);
+  }
   const account = document.createElement("span");
   account.className = "account";
   account.textContent = `@${post.username}`;
