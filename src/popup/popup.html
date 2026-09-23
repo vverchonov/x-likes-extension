@@ -14,26 +14,103 @@
         <a id="site-link" href="https://example.com" target="_blank" rel="noreferrer">Website</a>
       </nav>
     </header>
-    <div class="row">
-      <div>
-        <p class="label">Capture likes</p>
-        <p class="hint">Original posts only</p>
+    <div id="home" class="home">
+    <section class="payout" aria-label="Payout">
+      <p id="payout-balance" class="payout-balance">$0.00</p>
+      <button id="payout-button" class="payout-button" type="button" hidden>Claim</button>
+      <p id="payout-minimum" class="payout-minimum">Payouts from $5+</p>
+    </section>
+    <main id="timeline" class="timeline"></main>
+    </div>
+    <section id="accounts" class="accounts" hidden>
+      <h1 class="accounts-title">My accounts</h1>
+      <div id="accounts-list" class="accounts-list"></div>
+    </section>
+    <section id="settings-panel" class="settings" hidden>
+      <div class="row">
+        <div>
+          <p class="label">Capture likes</p>
+          <p class="hint">Original posts only</p>
+        </div>
+        <button id="capture-toggle" type="button" role="switch" aria-checked="true" aria-label="Capture likes">
+          <span class="knob"></span>
+        </button>
       </div>
-      <div class="row-actions">
-        <button id="refresh" type="button" aria-label="Refresh">
-          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+      <div class="row">
+        <div>
+          <p class="label">Test mode</p>
+          <p class="hint">Show $23,467 to claim</p>
+        </div>
+        <button id="test-mode" class="test-mode" type="button" aria-pressed="false">Test mode</button>
+      </div>
+    </section>
+    <section id="processing" class="processing" hidden>
+      <div class="processing-body">
+        <p class="processing-title">Your payment is processing</p>
+        <button id="processing-done" type="button">Done</button>
+      </div>
+    </section>
+    <section id="claim" class="claim" hidden>
+      <button id="claim-back" class="back" type="button">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+          <path fill="currentColor" d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z" />
+        </svg>
+        Back
+      </button>
+      <form id="claim-form" class="claim-form">
+        <label for="wallet">SOL wallet</label>
+        <input id="wallet" name="wallet" type="text" autocomplete="off" spellcheck="false" placeholder="Wallet address" aria-describedby="wallet-error" />
+        <p id="wallet-error" class="wallet-error" hidden>Not a valid Solana wallet</p>
+        <button id="claim-button" type="submit" disabled>Claim</button>
+        <p id="claim-status" class="claim-status" hidden></p>
+      </form>
+    </section>
+    <section id="confirm-remove" class="confirm" hidden>
+      <div class="confirm-card">
+        <p class="confirm-title">Remove this account?</p>
+        <p id="confirm-account" class="confirm-account"></p>
+        <p class="confirm-note">It stays on X. Sign in or switch to this account and it shows here again.</p>
+        <div class="confirm-actions">
+          <button id="confirm-cancel" type="button">Cancel</button>
+          <button id="confirm-remove-button" type="button">Remove</button>
+        </div>
+      </div>
+    </section>
+    <footer class="footer">
+      <nav class="tabs" aria-label="Screens">
+        <button id="nav-home" class="icon-button" type="button" aria-label="Home" aria-current="page">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+            <path fill="currentColor" d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z" />
+          </svg>
+        </button>
+        <button id="nav-accounts" class="icon-button" type="button" aria-label="Accounts">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+            <path
+              fill="currentColor"
+              d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"
+            />
+          </svg>
+        </button>
+      </nav>
+      <div class="footer-tools">
+        <button id="refresh" class="icon-button" type="button" aria-label="Refresh">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
             <path
               fill="currentColor"
               d="M17.65 6.35A7.96 7.96 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08a5.99 5.99 0 0 1-5.65 4c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z"
             />
           </svg>
         </button>
-        <button id="capture-toggle" type="button" role="switch" aria-checked="true" aria-label="Capture likes">
-          <span class="knob"></span>
+        <button id="settings" class="icon-button" type="button" aria-label="Settings" aria-expanded="false" aria-controls="settings-panel">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+            <path
+              fill="currentColor"
+              d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.1 7.1 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54c-.58.23-1.12.54-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 8.48a.5.5 0 0 0 .12.64l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32c.13.23.4.32.64.22l2.39-.96c.5.4 1.05.72 1.63.94l.36 2.54c.05.24.26.42.5.42h3.84c.24 0 .45-.18.5-.42l.36-2.54c.58-.23 1.12-.54 1.63-.94l2.39.96c.24.1.51 0 .64-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58zM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5z"
+            />
+          </svg>
         </button>
       </div>
-    </div>
-    <main id="timeline" class="timeline"></main>
+    </footer>
     <script src="popup.js"></script>
   </body>
 </html>

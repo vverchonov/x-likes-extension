@@ -91,12 +91,28 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   sendResponse({ username: account?.username ?? null });
 });
 
+watchSignedInAccount();
+
 async function sendPayload(payload: LikedPostPayload): Promise<void> {
   await chrome.runtime.sendMessage({ type: "liked-post", payload });
 }
 
 function isUsernameRequest(message: unknown): boolean {
   return Boolean(message) && typeof message === "object" && (message as { type?: unknown }).type === "current-username";
+}
+
+function watchSignedInAccount(): void {
+  let reported = "";
+  const report = () => {
+    const username = currentAccount()?.username;
+    if (!username || username.toLowerCase() === reported) return;
+    reported = username.toLowerCase();
+    chrome.runtime.sendMessage({ type: "seen-account", username }, () => {
+      void chrome.runtime.lastError;
+    });
+  };
+  report();
+  window.setInterval(report, 1000);
 }
 
 function currentAccount(): { username: string; avatarUrl: string | null } | null {

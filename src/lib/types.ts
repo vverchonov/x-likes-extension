@@ -22,6 +22,7 @@ export type LikedPostPayload = {
 
 export type LikedPost = LikedPostPayload & {
   coinUrl: string | null;
+  earning: number | null;
 };
 
 export type DomCaptureInput = {
