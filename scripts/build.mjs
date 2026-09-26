@@ -24,7 +24,8 @@ const entries = [
 
 const manifest = {
   manifest_version: 3,
-  name: "Likes",
+  name: "ScrollX",
+  short_name: "ScrollX",
   version: "0.1.0",
   description: "Shows the posts you liked on X and lets you claim earnings from the coins they created.",
   action: {

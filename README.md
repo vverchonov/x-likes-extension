@@ -1,4 +1,4 @@
-# Likes extension
+# ScrollX extension
 
 Chrome and Brave build of the X like capture extension. One Manifest V3 package is written to `dist/chrome` and `dist/brave`.
 
