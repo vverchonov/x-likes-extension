@@ -4,7 +4,7 @@ The extension talks to one URL, `BE_ENDPOINT`. That URL receives a like and, whe
 
 A like is sent only after the person has agreed to the data disclaimer, capture is on, and the signed-in X handle can be read. The same POST is sent when that person reposts a post or comments on it. The body is always the original post, including when they reply to a comment under that post. The comment’s own text is not sent. Unlikes and removing a repost are not sent. Nothing is sent before that agreement. If the POST fails, the extension tries once more. The popup does not ask for the list on every like, repost, or comment.
 
-## Send a like
+## Send a like, repost, or comment
 
 `POST {BE_ENDPOINT}`
 
@@ -27,14 +27,14 @@ A like is sent only after the person has agreed to the data disclaimer, capture 
 | `postId` | string | X status id of the original post. A repost or comment uses that post, not the comment. A reply to a comment under the post still uses the post. |
 | `username` | string | The one account that liked, reposted, or commented, without `@`. Read from the open X page on that action. 1–15 letters, numbers, or underscores. Switching accounts does not change an action that was already sent. |
 | `avatarUrl` | string or `null` | Profile image URL for that account. `null` when X did not show one. Only `https` URLs are sent. |
-| `text` | string or `null` | Post text. `null` when the post has none. |
-| `media` | array | Images and videos on that post. Each item is `{ "type": "image" \| "video", "url": "https://..." }`. Empty when there is no media. |
+| `text` | string or `null` | Post text. `null` when the post has none, or when the extension only knew the post id and could not read the caption. |
+| `media` | array | Images and videos on that post. Each item is `{ "type": "image" \| "video", "url": "https://..." }`. Empty when there is no media, or when the caption could not be read. |
 | `url` | string | `https://x.com/i/status/{postId}`. |
 | `likedAt` | string | ISO-8601 time when the extension saw the like, repost, or comment. |
 
 A `2xx` response means the like was accepted. Any other status, or a network failure, is a failure. The body of the POST response is ignored.
 
-The same post can be sent again if the person likes, reposts, or comments on it again. Treat `postId` plus `username` as the engagement to store. A comment does not add a second post id for the reply.
+The same post can be sent again if the person likes, reposts, or comments on it again. Treat `postId` plus `username` as the engagement to store. A comment does not add a second post id for the reply. There is no field that says whether this POST was a like, a repost, or a comment. A later POST for the same `postId` and `username` may arrive with `text: null` and `media: []` when the extension could not read the post. Keep a caption and media already stored for that pair.
 
 ## List likes
 
@@ -42,9 +42,9 @@ The same post can be sent again if the person likes, reposts, or comments on it 
 
 `Accept: application/json`
 
-`usernames` is every unique account the extension has seen this person sign in with, comma-separated, with the latest switch last. The extension records an account the first time it can read the signed-in handle on an open X page, and again each time that person switches accounts. The same handle is stored once. `likes` is every like stored for those accounts, not only the account open on X. `balance` is the combined USD payout for that whole list.
+`usernames` is every unique account the extension has seen this person sign in with, comma-separated, with the latest switch last. The extension records an account the first time it can read the signed-in handle on an open X page, and again each time that person switches accounts. The same handle is stored once. `likes` is every like, repost, and comment stored for those accounts, not only the account open on X. `balance` is the combined USD payout for that whole list.
 
-The extension keeps the last successful list for **1 minute**, and only while the set of `usernames` is unchanged. Opening the popup inside that minute shows the saved list and does not call the backend. Opening it after a minute, or adding or removing a tracked account, calls `GET` again. Switching which account is open on X does not, while that account is already in the set. **Refresh** at the bottom of the popup always calls `GET`. A successful like POST clears the saved list, so the next time the popup opens it calls `GET` again. A successful payout claim clears the saved list and calls `GET` again immediately.
+The extension keeps the last successful list for **1 minute**, and only while the set of `usernames` is unchanged. Opening the popup inside that minute shows the saved list and does not call the backend. Opening it after a minute, or adding or removing a tracked account, calls `GET` again. Switching which account is open on X does not, while that account is already in the set. **Refresh** at the bottom of the popup always calls `GET`. A successful like, repost, or comment POST clears the saved list, so the next time the popup opens it calls `GET` again. A successful payout claim clears the saved list and calls `GET` again immediately.
 
 ```json
 {
@@ -69,7 +69,7 @@ The extension keeps the last successful list for **1 minute**, and only while th
 }
 ```
 
-The body is a JSON object with `balance`, `balances`, and a `likes` array. `likes` includes each tracked account. A like’s `username` is the account that liked that post, so the same post can appear once per account that liked it. The home screen shows that whole list together, newest `likedAt` first, with `@username` on each row. Post `text` can be the full caption. The popup shows at most three lines. `balance` is the combined USD amount the accounts in `usernames` can receive. A missing or invalid `balance` is shown as `$0.00`. The popup enables **Claim** on the home screen only when that combined `balance` is greater than `5`. At `$5` or below it hides that button and shows “Payouts from $5+”. Home **Claim** pays every account in `usernames` together.
+The body is a JSON object with `balance`, `balances`, and a `likes` array. `likes` includes each tracked account. A row’s `username` is the account that liked, reposted, or commented on that post, so the same post can appear once per account. The home screen shows that whole list together, newest `likedAt` first, with `@username` on each row. Post `text` can be the full caption. The popup shows at most three lines. `balance` is the combined USD amount the accounts in `usernames` can receive. A missing or invalid `balance` is shown as `$0.00`. The popup enables **Claim** on the home screen only when that combined `balance` is greater than `5`. At `$5` or below it hides that button and shows “Payouts from $5+”. Home **Claim** pays every account in `usernames` together.
 
 `balances` is one entry per saved account: `{ "username", "balance" }`. The accounts screen lists every handle saved in the extension. **Claim** on a row is enabled only when that account’s balance is greater than `5`, and the claim body then lists only that username. A handle missing from `balances`, or a list request that fails, shows `-` for that row and no claim button. An entry that is present with a missing or invalid `balance` is shown as `$0.00`. Test mode is local to the popup. It does not change this `GET`, and a claim made in test mode is not sent.
 
@@ -106,7 +106,7 @@ Removing an account in the popup only drops it from the saved list. It is not de
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `type` | `"payout"` | This body is a payout claim, not a like. |
+| `type` | `"payout"` | This body is a payout claim, not a like, repost, or comment. |
 | `username` | string | Account this claim is paid to. Home uses the account open on X when that account is still saved, and otherwise the latest saved account. An account row uses that row. |
 | `usernames` | string array | Accounts included in this payout. Home sends every saved account. A row sends only that account. |
 | `wallet` | string | Solana address where the person wants the payout. |
