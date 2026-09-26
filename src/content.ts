@@ -1,6 +1,6 @@
 import { isCaptureEnabled } from "./lib/capture.ts";
 import { CAPTURE_CONSENT_ATTR, DISCLAIMER_ACCEPTED_KEY, isDisclaimerAccepted } from "./lib/consent.ts";
-import { findArticleByStatusId, observeArticle, type DomObservation } from "./lib/dom.ts";
+import { findArticleByStatusId, observeArticle, rootPostOnStatusPage, type DomObservation } from "./lib/dom.ts";
 import {
   decideDomCapture,
   payloadFromCached,
@@ -11,7 +11,7 @@ import {
   usernameFromAccountText,
   usernameFromProfileHref,
 } from "./lib/extract.ts";
-import type { CachedTweet, LikedPostPayload, MediaItem } from "./lib/types.ts";
+import type { CachedTweet, EngagementKind, LikedPostPayload, MediaItem } from "./lib/types.ts";
 import { PAGE_MESSAGE_SOURCE } from "./lib/types.ts";
 
 const recentArticles = new Map<string, DomObservation>();
@@ -32,14 +32,14 @@ function startWatching(): void {
   if (watching) return;
   watching = true;
   document.documentElement?.setAttribute(CAPTURE_CONSENT_ATTR, "on");
-  document.addEventListener("click", onLikeClick, true);
+  document.addEventListener("click", onPostActionClick, true);
   window.addEventListener("message", onPageMessage);
   chrome.runtime.onMessage.addListener(onRuntimeMessage);
   watchSignedInAccount();
 }
 
-function onLikeClick(event: Event): void {
-  const button = likeButtonFromEvent(event);
+function onPostActionClick(event: Event): void {
+  const button = actionButtonFromEvent(event);
   if (!button) return;
   const article = button.closest('article[data-testid="tweet"]');
   if (!article) return;
@@ -49,10 +49,9 @@ function onLikeClick(event: Event): void {
 
 function onPageMessage(event: MessageEvent): void {
   if (event.origin !== window.location.origin || event.source !== window) return;
-  const tweetId = favoriteTweetId(event.data);
-  if (!tweetId) return;
-  const tweetValue = event.data && typeof event.data === "object" ? (event.data as { tweet?: unknown }).tweet : null;
-  void onFavorite(tweetId, tweetValue);
+  const engagement = pageEngagement(event.data);
+  if (!engagement) return;
+  void onEngagement(engagement);
 }
 
 function onRuntimeMessage(message: unknown, _sender: chrome.runtime.MessageSender, sendResponse: (response: unknown) => void): void {
@@ -61,13 +60,33 @@ function onRuntimeMessage(message: unknown, _sender: chrome.runtime.MessageSende
   sendResponse({ username: account?.username ?? null });
 }
 
-async function onFavorite(tweetId: string, tweetValue: unknown): Promise<void> {
+async function onEngagement(engagement: PageEngagement): Promise<void> {
   if (!(await isDisclaimerAccepted())) return;
   if (!(await isCaptureEnabled())) return;
 
   const account = currentAccount();
   if (!account) return;
 
+  switch (engagement.kind) {
+    case "like":
+      await sendLikedPost(engagement.tweetId, engagement.tweet, account);
+      return;
+    case "repost":
+    case "comment":
+      await sendEngagedPost(engagement, account);
+      return;
+    default: {
+      const unreachable: never = engagement.kind;
+      throw new Error(`Unhandled engagement: ${JSON.stringify(unreachable)}`);
+    }
+  }
+}
+
+async function sendLikedPost(
+  tweetId: string,
+  tweetValue: unknown,
+  account: { username: string; avatarUrl: string | null },
+): Promise<void> {
   const tweet = readCachedTweet(tweetValue);
   if (tweet && tweet.postId === tweetId) {
     if (tweet.isReply) return;
@@ -77,16 +96,54 @@ async function onFavorite(tweetId: string, tweetValue: unknown): Promise<void> {
 
   const observation = observationFor(tweetId);
   if (!observation) return;
+  await sendObservation(observation, account, statusIdFromHref(location.pathname));
+}
 
+async function sendEngagedPost(
+  engagement: PageEngagement,
+  account: { username: string; avatarUrl: string | null },
+): Promise<void> {
+  const tweet = readCachedTweet(engagement.tweet);
+  if (tweet && tweet.postId === engagement.tweetId && !tweet.isReply) {
+    await sendPayload(payloadFromCached(tweet, new Date().toISOString(), account.username, account.avatarUrl));
+    return;
+  }
+
+  const clicked = observationFor(engagement.tweetId);
+  if (clicked && (await sendObservation(clicked, account, null))) return;
+
+  const pageRoot = rootPostOnStatusPage(document, location.pathname);
+  const clickedIsReply = clicked?.hasReplyingTo === true;
+  const pageRootIsTarget = pageRoot?.postId === engagement.tweetId;
+  const replyOnThisPost = !engagement.original && (clickedIsReply || !clicked);
+  if (pageRoot && (pageRootIsTarget || replyOnThisPost) && (await sendObservation(pageRoot, account, null))) return;
+
+  if (!engagement.original) return;
+  await sendPayload({
+    postId: engagement.tweetId,
+    username: account.username,
+    avatarUrl: account.avatarUrl,
+    text: null,
+    media: [],
+    url: postUrl(engagement.tweetId),
+    likedAt: new Date().toISOString(),
+  });
+}
+
+async function sendObservation(
+  observation: DomObservation,
+  account: { username: string; avatarUrl: string | null },
+  pageStatusId: string | null,
+): Promise<boolean> {
   const decision = decideDomCapture({
     postId: observation.postId,
     hasReplyingTo: observation.hasReplyingTo,
-    pageStatusId: statusIdFromHref(location.pathname),
+    pageStatusId,
   });
 
   switch (decision.action) {
     case "drop":
-      return;
+      return false;
     case "send":
       await sendPayload({
         postId: decision.postId,
@@ -97,7 +154,7 @@ async function onFavorite(tweetId: string, tweetValue: unknown): Promise<void> {
         url: postUrl(decision.postId),
         likedAt: new Date().toISOString(),
       });
-      return;
+      return true;
     default: {
       const unreachable: never = decision;
       throw new Error(`Unhandled capture decision: ${JSON.stringify(unreachable)}`);
@@ -159,17 +216,41 @@ function avatarWithin(root: Element | null): string | null {
   return null;
 }
 
-function likeButtonFromEvent(event: Event): HTMLElement | null {
+function actionButtonFromEvent(event: Event): HTMLElement | null {
   if (!(event.target instanceof Element)) return null;
-  const button = event.target.closest('[data-testid="like"]');
+  const button = event.target.closest('[data-testid="like"], [data-testid="retweet"], [data-testid="reply"]');
   return button instanceof HTMLElement ? button : null;
 }
 
-function favoriteTweetId(value: unknown): string | null {
+type PageEngagement = {
+  tweetId: string;
+  tweet: unknown;
+  kind: EngagementKind;
+  original: boolean;
+};
+
+function pageEngagement(value: unknown): PageEngagement | null {
   if (!value || typeof value !== "object") return null;
   const record = value as Record<string, unknown>;
   if (record.source !== PAGE_MESSAGE_SOURCE || record.type !== "favorite") return null;
-  return typeof record.tweetId === "string" && record.tweetId.length > 0 ? record.tweetId : null;
+  if (typeof record.tweetId !== "string" || record.tweetId.length === 0) return null;
+  return {
+    tweetId: record.tweetId,
+    tweet: record.tweet,
+    kind: engagementKind(record.kind),
+    original: record.original === true,
+  };
+}
+
+function engagementKind(value: unknown): EngagementKind {
+  switch (value) {
+    case "like":
+    case "repost":
+    case "comment":
+      return value;
+    default:
+      return "like";
+  }
 }
 
 function readCachedTweet(value: unknown): CachedTweet | null {
@@ -192,5 +273,8 @@ function readCachedTweet(value: unknown): CachedTweet | null {
     text: record.text,
     media,
     isReply: record.isReply,
+    conversationId: typeof record.conversationId === "string" && record.conversationId.length > 0 ? record.conversationId : null,
+    inReplyToStatusId:
+      typeof record.inReplyToStatusId === "string" && record.inReplyToStatusId.length > 0 ? record.inReplyToStatusId : null,
   };
 }

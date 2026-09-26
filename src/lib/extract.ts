@@ -1,4 +1,11 @@
-import type { CachedTweet, DomCaptureInput, DomDecision, LikedPostPayload, MediaItem } from "./types.ts";
+import type {
+  CachedTweet,
+  DomCaptureInput,
+  DomDecision,
+  LikedPostPayload,
+  MediaItem,
+  OutgoingEngagement,
+} from "./types.ts";
 
 const TWEET_CACHE_LIMIT = 2000;
 
@@ -22,6 +29,16 @@ export function isUnfavoriteTweetRequest(url: string): boolean {
   return graphqlOperation(url) === "UnfavoriteTweet";
 }
 
+export function isEngagementOperation(url: string): boolean {
+  const operation = graphqlOperation(url);
+  return (
+    operation === "FavoriteTweet" ||
+    operation === "CreateRetweet" ||
+    operation === "CreateTweet" ||
+    operation === "CreateNoteTweet"
+  );
+}
+
 export function shouldHarvestTweets(url: string): boolean {
   const operation = graphqlOperation(url);
   if (!operation) return false;
@@ -38,25 +55,55 @@ export function statusIdFromHref(href: string): string | null {
 }
 
 export function parseFavoriteTweetId(body: string): string | null {
-  const trimmed = body.trim();
-  if (!trimmed) return null;
+  const variables = graphqlVariables(body);
+  const tweetId = variables?.tweet_id;
+  return typeof tweetId === "string" && tweetId.length > 0 ? tweetId : null;
+}
 
-  try {
-    const id = tweetIdFromUnknown(JSON.parse(trimmed) as unknown);
-    if (id) return id;
-  } catch {
-    // X sometimes sends the GraphQL variables as form fields.
-  }
-
-  const params = new URLSearchParams(trimmed);
-  const variables = params.get("variables");
+export function parseReplyToTweetId(body: string): string | null {
+  const variables = graphqlVariables(body);
   if (!variables) return null;
-
-  try {
-    return tweetIdFromUnknown(JSON.parse(variables) as unknown);
-  } catch {
-    return null;
+  const reply = asRecord(variables.reply);
+  const candidates = [reply?.in_reply_to_tweet_id, reply?.in_reply_to_status_id, variables.in_reply_to_tweet_id];
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.length > 0) return candidate;
   }
+  return null;
+}
+
+export function engagementFromRequest(url: string, body: string | null): OutgoingEngagement | null {
+  if (!body) return null;
+  const operation = graphqlOperation(url);
+  if (operation === "FavoriteTweet") {
+    const tweetId = parseFavoriteTweetId(body);
+    return tweetId ? { kind: "like", tweetId } : null;
+  }
+  if (operation === "CreateRetweet") {
+    const tweetId = parseFavoriteTweetId(body);
+    return tweetId ? { kind: "repost", tweetId } : null;
+  }
+  if (operation === "CreateTweet" || operation === "CreateNoteTweet") {
+    const tweetId = parseReplyToTweetId(body);
+    return tweetId ? { kind: "comment", tweetId } : null;
+  }
+  return null;
+}
+
+export function originalPostForEngagement(
+  cache: ReadonlyMap<string, CachedTweet>,
+  startId: string,
+): { postId: string; tweet: CachedTweet | null } | null {
+  const walked = walkToOriginalPost(cache, startId);
+  if (walked) return walked;
+
+  for (const tweet of cache.values()) {
+    if (tweet.inReplyToStatusId !== startId || !tweet.conversationId) continue;
+    if (tweet.conversationId === startId) return { postId: startId, tweet: cache.get(startId) ?? null };
+    const root = cache.get(tweet.conversationId) ?? null;
+    if (!root || !root.isReply) return { postId: tweet.conversationId, tweet: root };
+  }
+
+  return null;
 }
 
 const HANDLE = /^[A-Za-z0-9_]{1,15}$/;
@@ -193,15 +240,50 @@ export function preferOriginalImage(url: string): string {
   }
 }
 
-function tweetIdFromUnknown(value: unknown): string | null {
-  const record = asRecord(value);
-  if (!record) return null;
-  if (typeof record.tweet_id === "string" && record.tweet_id.length > 0) return record.tweet_id;
-  const variables = asRecord(record.variables);
-  if (variables && typeof variables.tweet_id === "string" && variables.tweet_id.length > 0) {
-    return variables.tweet_id;
+function walkToOriginalPost(
+  cache: ReadonlyMap<string, CachedTweet>,
+  startId: string,
+): { postId: string; tweet: CachedTweet | null } | null {
+  const seen = new Set<string>();
+  let id = startId;
+
+  while (!seen.has(id)) {
+    seen.add(id);
+    const tweet = cache.get(id);
+    if (!tweet) return null;
+    if (!tweet.isReply) return { postId: tweet.postId, tweet };
+    if (tweet.conversationId && tweet.conversationId !== tweet.postId) {
+      const root = cache.get(tweet.conversationId) ?? null;
+      if (!root || !root.isReply) return { postId: tweet.conversationId, tweet: root };
+    }
+    if (!tweet.inReplyToStatusId || seen.has(tweet.inReplyToStatusId)) return null;
+    id = tweet.inReplyToStatusId;
   }
+
   return null;
+}
+
+function graphqlVariables(body: string): Record<string, unknown> | null {
+  const trimmed = body.trim();
+  if (!trimmed) return null;
+
+  const direct = parseJsonRecord(trimmed);
+  if (direct) return asRecord(direct.variables) ?? direct;
+
+  try {
+    const variables = new URLSearchParams(trimmed).get("variables");
+    return variables ? parseJsonRecord(variables) : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseJsonRecord(value: string): Record<string, unknown> | null {
+  try {
+    return asRecord(JSON.parse(value) as unknown);
+  } catch {
+    return null;
+  }
 }
 
 function readTweet(node: Record<string, unknown>): CachedTweet | null {
@@ -214,12 +296,15 @@ function readTweet(node: Record<string, unknown>): CachedTweet | null {
 
   const replyId = legacy.in_reply_to_status_id_str;
   const fullText = typeof legacy.full_text === "string" ? legacy.full_text : null;
+  const conversationId = legacy.conversation_id_str;
 
   return {
     postId: node.rest_id,
     text: readNoteText(node) ?? fullText,
     media: readMedia(legacy),
     isReply: typeof replyId === "string" && replyId.length > 0,
+    conversationId: typeof conversationId === "string" && conversationId.length > 0 ? conversationId : null,
+    inReplyToStatusId: typeof replyId === "string" && replyId.length > 0 ? replyId : null,
   };
 }
 

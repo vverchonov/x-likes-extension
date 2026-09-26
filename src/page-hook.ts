@@ -1,12 +1,19 @@
 import { CAPTURE_CONSENT_ATTR } from "./lib/consent.ts";
 import {
   collectTweets,
-  isFavoriteTweetRequest,
-  parseFavoriteTweetId,
+  engagementFromRequest,
+  isEngagementOperation,
+  originalPostForEngagement,
   rememberTweets,
   shouldHarvestTweets,
 } from "./lib/extract.ts";
-import { PAGE_MESSAGE_SOURCE, type CachedTweet, type FavoritePageMessage } from "./lib/types.ts";
+import {
+  PAGE_MESSAGE_SOURCE,
+  type CachedTweet,
+  type EngagementKind,
+  type FavoritePageMessage,
+  type OutgoingEngagement,
+} from "./lib/types.ts";
 
 const cache = new Map<string, CachedTweet>();
 const xhrUrls = new WeakMap<XMLHttpRequest, string>();
@@ -51,9 +58,9 @@ function install(): void {
 
 async function captureFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const url = requestUrl(input);
-  const favoriteId = isFavoriteTweetRequest(url) ? await readFavoriteId(input, init) : null;
+  const engagement = isEngagementOperation(url) ? await readEngagement(input, init, url) : null;
   const response = await originalFetch(input, init);
-  if (favoriteId && response.ok) publishFavorite(favoriteId);
+  if (engagement && response.ok) await publishEngagement(engagement, response);
   else if (shouldHarvestTweets(url)) harvestResponse(response);
   return response;
 }
@@ -75,12 +82,22 @@ function captureSend(
   body?: Document | XMLHttpRequestBodyInit | null,
 ): void {
   const url = xhrUrls.get(this) ?? "";
-  if (isFavoriteTweetRequest(url)) {
+  if (isEngagementOperation(url)) {
     const xhr = this;
-    const pendingId = readBody(body).then((text) => (text ? parseFavoriteTweetId(text) : null));
+    const pendingBody = readBody(body);
     xhr.addEventListener("load", () => {
-      void pendingId.then((tweetId) => {
-        if (tweetId && xhr.status >= 200 && xhr.status < 300) publishFavorite(tweetId);
+      void pendingBody.then((text) => {
+        if (xhr.status < 200 || xhr.status >= 300) return;
+        const engagement = engagementFromRequest(url, text);
+        if (!engagement) return;
+        if (engagement.kind !== "like") {
+          try {
+            harvestText(xhr.responseText);
+          } catch {
+            // responseText throws when the response type is not text.
+          }
+        }
+        publishResolvedEngagement(engagement);
       });
     });
   } else if (shouldHarvestTweets(url)) {
@@ -95,24 +112,55 @@ function captureSend(
   originalSend.call(this, body);
 }
 
-function publishFavorite(tweetId: string): void {
+async function publishEngagement(engagement: OutgoingEngagement, response: Response): Promise<void> {
+  if (engagement.kind !== "like") await harvestResponseNow(response);
+  publishResolvedEngagement(engagement);
+}
+
+function publishResolvedEngagement(engagement: OutgoingEngagement): void {
+  switch (engagement.kind) {
+    case "like":
+      publishFavorite(engagement.tweetId, cache.get(engagement.tweetId) ?? null, "like", false);
+      return;
+    case "repost":
+    case "comment": {
+      const resolved = originalPostForEngagement(cache, engagement.tweetId);
+      if (resolved) {
+        publishFavorite(resolved.postId, resolved.tweet, engagement.kind, true);
+        return;
+      }
+      publishFavorite(engagement.tweetId, null, engagement.kind, false);
+      return;
+    }
+    default: {
+      const unreachable: never = engagement.kind;
+      throw new Error(`Unhandled engagement: ${JSON.stringify(unreachable)}`);
+    }
+  }
+}
+
+function publishFavorite(tweetId: string, tweet: CachedTweet | null, kind: EngagementKind, original: boolean): void {
   const message: FavoritePageMessage = {
     source: PAGE_MESSAGE_SOURCE,
     type: "favorite",
     tweetId,
-    tweet: cache.get(tweetId) ?? null,
+    tweet,
+    kind,
+    original,
   };
   window.postMessage(message, window.location.origin);
 }
 
 function harvestResponse(response: Response): void {
-  void response
-    .clone()
-    .json()
-    .then((data: unknown) => {
-      harvestValue(data);
-    })
-    .catch(() => undefined);
+  void harvestResponseNow(response);
+}
+
+async function harvestResponseNow(response: Response): Promise<void> {
+  try {
+    harvestValue(await response.clone().json());
+  } catch {
+    // The response was not JSON, or it was already consumed.
+  }
 }
 
 function harvestText(text: string): void {
@@ -123,15 +171,19 @@ function harvestValue(value: unknown): void {
   rememberTweets(cache, collectTweets(value));
 }
 
-async function readFavoriteId(input: RequestInfo | URL, init?: RequestInit): Promise<string | null> {
+async function readEngagement(
+  input: RequestInfo | URL,
+  init: RequestInit | undefined,
+  url: string,
+): Promise<OutgoingEngagement | null> {
   try {
     if (init?.body != null) {
       const text = await readBody(init.body);
-      if (text) return parseFavoriteTweetId(text);
+      return engagementFromRequest(url, text);
     }
     if (input instanceof Request) {
       const text = await input.clone().text();
-      return parseFavoriteTweetId(text);
+      return engagementFromRequest(url, text);
     }
   } catch {
     return null;

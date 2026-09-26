@@ -11,15 +11,16 @@
       <img class="mark" src="icons/icon32.png" alt="" width="32" height="32" />
       <h1>Data this extension collects</h1>
       <p>Nothing is collected until you agree. Likes does not watch X, save your account, or send a like before that.</p>
-      <p>After you agree, liking an original post on X sends:</p>
+      <p>After you agree, liking, reposting, or commenting on a post on X sends that post:</p>
       <ul>
         <li>Your X username and profile picture</li>
         <li>The post text, images, videos, and link</li>
-        <li>The time you liked it</li>
+        <li>The time you liked, reposted, or commented</li>
       </ul>
       <p>
-        Replies are not collected. Your signed-in X username is saved on this device so this popup can show that account’s likes and
-        earnings. A wallet address is sent only if you later claim a payout. You can turn capture off in settings.
+        A reply to a comment under a post still sends the post, not the comment. Unlikes and removing a repost are not collected.
+        Your signed-in X username is saved on this device so this popup can show that account’s likes and earnings. A wallet address
+        is sent only if you later claim a payout. You can turn capture off in settings.
       </p>
       <label class="disclaimer-agree">
         <input id="disclaimer-agree" type="checkbox" />
@@ -50,7 +51,7 @@
       <div class="row">
         <div>
           <p class="label">Capture likes</p>
-          <p class="hint">Original posts only</p>
+          <p class="hint">Likes, reposts, and comments</p>
         </div>
         <button id="capture-toggle" type="button" role="switch" aria-checked="true" aria-label="Capture likes">
           <span class="knob"></span>

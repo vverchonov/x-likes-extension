@@ -17,6 +17,17 @@ export function observeArticle(article: Element): DomObservation {
   };
 }
 
+export function rootPostOnStatusPage(root: ParentNode, pathname: string): DomObservation | null {
+  if (!statusIdFromHref(pathname)) return null;
+  const main = root.querySelector('[data-testid="primaryColumn"]') ?? root;
+  const articles = main.querySelectorAll('article[data-testid="tweet"]');
+  for (const article of articles) {
+    const observation = observeArticle(article);
+    if (observation.postId && !observation.hasReplyingTo) return observation;
+  }
+  return null;
+}
+
 export function findArticleByStatusId(root: ParentNode, postId: string): Element | null {
   const articles = root.querySelectorAll('article[data-testid="tweet"]');
   for (const article of articles) {

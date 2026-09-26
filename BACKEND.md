@@ -2,7 +2,7 @@
 
 The extension talks to one URL, `BE_ENDPOINT`. That URL receives a like and, when the popup needs a fresh list, returns likes for every X account the extension has seen that person sign in with. The payout balance is for that same list. There is no auth header and no cookie. The extension calls the URL from its own background worker, so the backend does not need browser CORS for these requests.
 
-A like is sent only after the person has agreed to the data disclaimer, capture is on, the post is an original post, and the signed-in X handle can be read. Replies are not sent. Unlikes are not sent. Nothing is sent before that agreement. If the POST fails, the extension tries once more. The popup does not ask for the list on every like.
+A like is sent only after the person has agreed to the data disclaimer, capture is on, and the signed-in X handle can be read. The same POST is sent when that person reposts a post or comments on it. The body is always the original post, including when they reply to a comment under that post. The comment’s own text is not sent. Unlikes and removing a repost are not sent. Nothing is sent before that agreement. If the POST fails, the extension tries once more. The popup does not ask for the list on every like, repost, or comment.
 
 ## Send a like
 
@@ -24,17 +24,17 @@ A like is sent only after the person has agreed to the data disclaimer, capture 
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `postId` | string | X status id of the liked post. |
-| `username` | string | The one account that liked the post, without `@`. Read from the open X page on that like. 1–15 letters, numbers, or underscores. Switching accounts does not change a like that was already sent. |
+| `postId` | string | X status id of the original post. A repost or comment uses that post, not the comment. A reply to a comment under the post still uses the post. |
+| `username` | string | The one account that liked, reposted, or commented, without `@`. Read from the open X page on that action. 1–15 letters, numbers, or underscores. Switching accounts does not change an action that was already sent. |
 | `avatarUrl` | string or `null` | Profile image URL for that account. `null` when X did not show one. Only `https` URLs are sent. |
 | `text` | string or `null` | Post text. `null` when the post has none. |
 | `media` | array | Images and videos on that post. Each item is `{ "type": "image" \| "video", "url": "https://..." }`. Empty when there is no media. |
 | `url` | string | `https://x.com/i/status/{postId}`. |
-| `likedAt` | string | ISO-8601 time when the extension saw the like. |
+| `likedAt` | string | ISO-8601 time when the extension saw the like, repost, or comment. |
 
 A `2xx` response means the like was accepted. Any other status, or a network failure, is a failure. The body of the POST response is ignored.
 
-The same post can be sent again if the person likes it again. Treat `postId` plus `username` as the like to store.
+The same post can be sent again if the person likes, reposts, or comments on it again. Treat `postId` plus `username` as the engagement to store. A comment does not add a second post id for the reply.
 
 ## List likes
 

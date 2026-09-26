@@ -8,6 +8,15 @@ export type CachedTweet = {
   text: string | null;
   media: MediaItem[];
   isReply: boolean;
+  conversationId: string | null;
+  inReplyToStatusId: string | null;
+};
+
+export type EngagementKind = "like" | "repost" | "comment";
+
+export type OutgoingEngagement = {
+  kind: EngagementKind;
+  tweetId: string;
 };
 
 export type LikedPostPayload = {
@@ -40,4 +49,7 @@ export type FavoritePageMessage = {
   type: "favorite";
   tweetId: string;
   tweet: CachedTweet | null;
+  kind: EngagementKind;
+  /** True when tweetId is the original post, including when the person replied to a comment under it. */
+  original: boolean;
 };

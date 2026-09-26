@@ -3,8 +3,10 @@ import { describe, it } from "node:test";
 import {
   collectTweets,
   decideDomCapture,
+  engagementFromRequest,
   isFavoriteTweetRequest,
   isUnfavoriteTweetRequest,
+  originalPostForEngagement,
   parseFavoriteTweetId,
   payloadFromCached,
   preferOriginalImage,
@@ -14,6 +16,7 @@ import {
   usernameFromAccountText,
   usernameFromProfileHref,
 } from "./extract.ts";
+import type { CachedTweet } from "./types.ts";
 
 const originalPost = {
   rest_id: "100",
@@ -131,6 +134,105 @@ describe("parseFavoriteTweetId", () => {
     assert.equal(shouldHarvestTweets("https://x.com/i/api/graphql/abc/FavoriteTweet"), false);
   });
 });
+
+describe("engagementFromRequest", () => {
+  const likeUrl = "https://x.com/i/api/graphql/abc/FavoriteTweet";
+  const repostUrl = "https://x.com/i/api/graphql/abc/CreateRetweet";
+  const commentUrl = "https://x.com/i/api/graphql/abc/CreateTweet";
+
+  it("reads a like, a repost, and a comment", () => {
+    assert.deepEqual(engagementFromRequest(likeUrl, JSON.stringify({ variables: { tweet_id: "100" } })), {
+      kind: "like",
+      tweetId: "100",
+    });
+    assert.deepEqual(engagementFromRequest(repostUrl, JSON.stringify({ variables: { tweet_id: "100" } })), {
+      kind: "repost",
+      tweetId: "100",
+    });
+    assert.deepEqual(
+      engagementFromRequest(
+        commentUrl,
+        JSON.stringify({ variables: { tweet_text: "nice", reply: { in_reply_to_tweet_id: "100" } } }),
+      ),
+      { kind: "comment", tweetId: "100" },
+    );
+  });
+
+  it("reads a long comment and ignores a new post", () => {
+    const noteUrl = "https://x.com/i/api/graphql/abc/CreateNoteTweet";
+    assert.deepEqual(
+      engagementFromRequest(noteUrl, JSON.stringify({ variables: { reply: { in_reply_to_tweet_id: "100" } } })),
+      { kind: "comment", tweetId: "100" },
+    );
+    assert.equal(engagementFromRequest(commentUrl, JSON.stringify({ variables: { tweet_text: "a new post" } })), null);
+    assert.equal(engagementFromRequest("https://x.com/i/api/graphql/abc/DeleteRetweet", JSON.stringify({ variables: { tweet_id: "100" } })), null);
+  });
+});
+
+describe("originalPostForEngagement", () => {
+  const post = cachedTweet({ postId: "100", text: "Hello from a post", conversationId: "100" });
+  const comment = cachedTweet({
+    postId: "200",
+    text: "This is a comment",
+    isReply: true,
+    conversationId: "100",
+    inReplyToStatusId: "100",
+  });
+  const replyToComment = cachedTweet({
+    postId: "300",
+    text: "A reply to that comment",
+    isReply: true,
+    conversationId: "100",
+    inReplyToStatusId: "200",
+  });
+
+  it("keeps a repost or comment on the original post", () => {
+    const cache = new Map([[post.postId, post], [comment.postId, comment]]);
+    assert.equal(originalPostForEngagement(cache, "100")?.postId, "100");
+    assert.equal(originalPostForEngagement(cache, "100")?.tweet?.text, "Hello from a post");
+    assert.equal(originalPostForEngagement(cache, "200")?.postId, "100");
+    assert.equal(originalPostForEngagement(cache, "200")?.tweet?.text, "Hello from a post");
+  });
+
+  it("sends the post when the person replies to a comment under it", () => {
+    const cache = new Map([
+      [post.postId, post],
+      [comment.postId, comment],
+      [replyToComment.postId, replyToComment],
+    ]);
+    const resolved = originalPostForEngagement(cache, "200");
+    assert.equal(resolved?.postId, "100");
+    assert.equal(resolved?.tweet?.text, "Hello from a post");
+    assert.equal(originalPostForEngagement(cache, "300")?.postId, "100");
+  });
+
+  it("uses the new reply's conversation when the comment itself was not cached", () => {
+    const cache = new Map([[replyToComment.postId, replyToComment]]);
+    const resolved = originalPostForEngagement(cache, "200");
+    assert.deepEqual(resolved, { postId: "100", tweet: null });
+  });
+
+  it("walks a reply chain when the conversation id is missing", () => {
+    const cache = new Map<string, CachedTweet>([
+      ["100", cachedTweet({ postId: "100", text: "Hello from a post" })],
+      ["200", cachedTweet({ postId: "200", isReply: true, inReplyToStatusId: "100" })],
+      ["300", cachedTweet({ postId: "300", isReply: true, inReplyToStatusId: "200" })],
+    ]);
+    assert.equal(originalPostForEngagement(cache, "300")?.postId, "100");
+    assert.equal(originalPostForEngagement(cache, "300")?.tweet?.text, "Hello from a post");
+  });
+});
+
+function cachedTweet(tweet: Pick<CachedTweet, "postId"> & Partial<CachedTweet>): CachedTweet {
+  return {
+    text: null,
+    media: [],
+    isReply: false,
+    conversationId: null,
+    inReplyToStatusId: null,
+    ...tweet,
+  };
+}
 
 describe("decideDomCapture", () => {
   it("sends a timeline post that is not a reply", () => {
