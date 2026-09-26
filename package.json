@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "build": "node scripts/build.mjs",
+    "package": "node scripts/build.mjs && node scripts/package.mjs",
     "test": "node --experimental-strip-types --test src/lib/*.test.ts",
     "typecheck": "tsc --noEmit"
   },

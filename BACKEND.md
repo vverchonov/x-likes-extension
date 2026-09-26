@@ -2,7 +2,7 @@
 
 The extension talks to one URL, `BE_ENDPOINT`. That URL receives a like and, when the popup needs a fresh list, returns likes for every X account the extension has seen that person sign in with. The payout balance is for that same list. There is no auth header and no cookie. The extension calls the URL from its own background worker, so the backend does not need browser CORS for these requests.
 
-A like is sent only when capture is on, the post is an original post, and the signed-in X handle can be read. Replies are not sent. Unlikes are not sent. If the POST fails, the extension tries once more. The popup does not ask for the list on every like.
+A like is sent only after the person has agreed to the data disclaimer, capture is on, the post is an original post, and the signed-in X handle can be read. Replies are not sent. Unlikes are not sent. Nothing is sent before that agreement. If the POST fails, the extension tries once more. The popup does not ask for the list on every like.
 
 ## Send a like
 

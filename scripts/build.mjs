@@ -26,7 +26,7 @@ const manifest = {
   manifest_version: 3,
   name: "Likes",
   version: "0.1.0",
-  description: "Send posts you like on X to your backend.",
+  description: "Shows the posts you liked on X and lets you claim earnings from the coins they created.",
   action: {
     default_popup: "popup.html",
     default_icon: iconPaths(),
@@ -35,16 +35,16 @@ const manifest = {
     service_worker: "background.js",
   },
   permissions: ["storage"],
-  host_permissions: ["https://x.com/*", "https://twitter.com/*", `${beOrigin}/*`],
+  host_permissions: hostPermissions(beOrigin),
   content_scripts: [
     {
-      matches: ["https://x.com/*", "https://twitter.com/*"],
+      matches: ["https://x.com/*"],
       js: ["page-hook.js"],
       run_at: "document_start",
       world: "MAIN",
     },
     {
-      matches: ["https://x.com/*", "https://twitter.com/*"],
+      matches: ["https://x.com/*"],
       js: ["content.js"],
       run_at: "document_start",
     },
@@ -75,6 +75,12 @@ for (const browser of ["chrome", "brave"]) {
     cpSync(resolve(root, "icons", `icon${size}.png`), resolve(outdir, "icons", `icon${size}.png`));
   }
   writeFileSync(resolve(outdir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
+function hostPermissions(origin) {
+  const permissions = ["https://x.com/*"];
+  if (new URL(origin).hostname !== "example.com") permissions.push(`${origin}/*`);
+  return permissions;
 }
 
 function iconPaths() {

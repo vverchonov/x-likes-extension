@@ -1,3 +1,4 @@
+import { CAPTURE_CONSENT_ATTR } from "./lib/consent.ts";
 import {
   collectTweets,
   isFavoriteTweetRequest,
@@ -14,16 +15,50 @@ const originalFetch = window.fetch.bind(window);
 const originalOpen = XMLHttpRequest.prototype.open;
 const originalSend = XMLHttpRequest.prototype.send;
 
-window.fetch = async function (input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+let installed = false;
+
+watchConsent();
+
+function watchConsent(): void {
+  const root = document.documentElement;
+  if (!root) {
+    document.addEventListener("DOMContentLoaded", watchConsent, { once: true });
+    return;
+  }
+  if (root.getAttribute(CAPTURE_CONSENT_ATTR) === "on") {
+    install();
+    return;
+  }
+  const observer = new MutationObserver(() => {
+    if (root.getAttribute(CAPTURE_CONSENT_ATTR) !== "on") return;
+    observer.disconnect();
+    install();
+  });
+  observer.observe(root, { attributes: true, attributeFilter: [CAPTURE_CONSENT_ATTR] });
+  if (root.getAttribute(CAPTURE_CONSENT_ATTR) === "on") {
+    observer.disconnect();
+    install();
+  }
+}
+
+function install(): void {
+  if (installed) return;
+  installed = true;
+  window.fetch = captureFetch;
+  XMLHttpRequest.prototype.open = captureOpen;
+  XMLHttpRequest.prototype.send = captureSend;
+}
+
+async function captureFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const url = requestUrl(input);
   const favoriteId = isFavoriteTweetRequest(url) ? await readFavoriteId(input, init) : null;
   const response = await originalFetch(input, init);
   if (favoriteId && response.ok) publishFavorite(favoriteId);
   else if (shouldHarvestTweets(url)) harvestResponse(response);
   return response;
-};
+}
 
-XMLHttpRequest.prototype.open = function (
+function captureOpen(
   this: XMLHttpRequest,
   method: string,
   url: string | URL,
@@ -33,9 +68,9 @@ XMLHttpRequest.prototype.open = function (
 ): void {
   xhrUrls.set(this, new URL(String(url), location.href).href);
   originalOpen.call(this, method, url, async ?? true, username, password);
-};
+}
 
-XMLHttpRequest.prototype.send = function (
+function captureSend(
   this: XMLHttpRequest,
   body?: Document | XMLHttpRequestBodyInit | null,
 ): void {
@@ -58,7 +93,7 @@ XMLHttpRequest.prototype.send = function (
     });
   }
   originalSend.call(this, body);
-};
+}
 
 function publishFavorite(tweetId: string): void {
   const message: FavoritePageMessage = {

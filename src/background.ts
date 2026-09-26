@@ -1,6 +1,7 @@
 import { BE_ENDPOINT } from "./config.ts";
 import { SIGNED_IN_ACCOUNTS_KEY, forgetAccount, rememberAccount, rememberedAccounts, sameAccounts } from "./lib/accounts.ts";
 import { isCaptureEnabled } from "./lib/capture.ts";
+import { isDisclaimerAccepted } from "./lib/consent.ts";
 import { httpsUrl } from "./lib/extract.ts";
 import {
   type AccountEarning,
@@ -23,7 +24,7 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) =
 
   const seen = seenAccount(message);
   if (seen) {
-    void storeAccount(seen);
+    void rememberSeenAccount(seen);
     return;
   }
 
@@ -52,6 +53,7 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) =
 });
 
 async function deliver(payload: LikedPostPayload): Promise<void> {
+  if (!(await isDisclaimerAccepted())) return;
   await storeAccount(payload.username);
   if (!(await isCaptureEnabled())) return;
   const delivered = await postOnce(payload);
@@ -65,6 +67,11 @@ async function deliver(payload: LikedPostPayload): Promise<void> {
   await chrome.storage.local.remove(LIKES_CACHE_KEY);
 }
 
+async function rememberSeenAccount(username: string): Promise<void> {
+  if (!(await isDisclaimerAccepted())) return;
+  await storeAccount(username);
+}
+
 async function loadLikes(
   username: string | null,
   force: boolean,
@@ -72,6 +79,8 @@ async function loadLikes(
   | { ok: true; username: string; accounts: string[]; balance: number; balances: AccountEarning[]; likes: LikedPost[] }
   | { ok: false; reason: "no-account" | "failed"; accounts: string[] }
 > {
+  if (!(await isDisclaimerAccepted())) return { ok: false, reason: "failed", accounts: [] };
+
   const accounts = await readAccounts();
   const current = listedAccount(username, accounts) ?? accounts.at(-1) ?? null;
   if (!current || accounts.length === 0) return { ok: false, reason: "no-account", accounts };
@@ -140,6 +149,7 @@ async function storeAccount(username: string): Promise<void> {
 }
 
 async function forgetStored(username: string): Promise<void> {
+  if (!(await isDisclaimerAccepted())) return;
   const previous = await readAccounts();
   const next = forgetAccount(previous, username);
   if (sameAccounts(previous, next)) return;
@@ -177,6 +187,7 @@ async function sendClaim(claim: {
   balance: number;
   accounts: string[];
 }): Promise<boolean> {
+  if (!(await isDisclaimerAccepted())) return false;
   const accounts = claim.accounts.length > 0 ? claim.accounts : await readAccounts();
   const body = payoutClaim(claim.username, claim.wallet, claim.balance, accounts);
   if (!body) return false;

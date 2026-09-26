@@ -2,7 +2,7 @@
 
 Chrome and Brave build of the X like capture extension. One Manifest V3 package is written to `dist/chrome` and `dist/brave`.
 
-Liking an original post on x.com or twitter.com sends it to `BE_ENDPOINT`. The popup loads that account’s likes from the same URL. Replies are ignored. Unlikes are ignored. The popup switch turns capture off.
+The first time the popup opens, it shows what data is collected and waits for an agree checkbox. Until that is accepted, the popup stays on that screen and the extension does not watch X, save the signed-in account, or send a like. After that, liking an original post on x.com or twitter.com sends it to `BE_ENDPOINT`. The popup loads that account’s likes from the same URL. Replies are ignored. Unlikes are ignored. The popup switch turns capture off.
 
 The request and response contract is in [BACKEND.md](BACKEND.md).
 

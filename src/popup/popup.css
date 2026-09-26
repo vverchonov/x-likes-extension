@@ -28,6 +28,87 @@ body {
   line-height: 20px;
 }
 
+body.is-locked .header,
+body.is-locked .home,
+body.is-locked .accounts,
+body.is-locked .settings,
+body.is-locked .processing,
+body.is-locked .claim,
+body.is-locked .confirm,
+body.is-locked .footer {
+  display: none;
+}
+
+.disclaimer {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  padding: 24px 20px 20px;
+  overflow-y: auto;
+}
+
+body:not(.is-locked) .disclaimer {
+  display: none;
+}
+
+.disclaimer h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.disclaimer p,
+.disclaimer li {
+  margin: 0;
+  font-size: 15px;
+  line-height: 20px;
+}
+
+.disclaimer ul {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.disclaimer-agree {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: auto;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.disclaimer-agree input {
+  width: 18px;
+  height: 18px;
+  margin: 1px 0 0;
+  accent-color: var(--primary);
+}
+
+#disclaimer-continue {
+  width: 100%;
+  height: 44px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--primary);
+  color: #ffffff;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+#disclaimer-continue:disabled {
+  background: var(--switch-off);
+  cursor: default;
+}
+
 .header {
   display: flex;
   flex: 0 0 auto;

@@ -1,4 +1,5 @@
 import { isCaptureEnabled } from "./lib/capture.ts";
+import { CAPTURE_CONSENT_ATTR, DISCLAIMER_ACCEPTED_KEY, isDisclaimerAccepted } from "./lib/consent.ts";
 import { findArticleByStatusId, observeArticle, type DomObservation } from "./lib/dom.ts";
 import {
   decideDomCapture,
@@ -15,28 +16,53 @@ import { PAGE_MESSAGE_SOURCE } from "./lib/types.ts";
 
 const recentArticles = new Map<string, DomObservation>();
 
-document.addEventListener(
-  "click",
-  (event) => {
-    const button = likeButtonFromEvent(event);
-    if (!button) return;
-    const article = button.closest('article[data-testid="tweet"]');
-    if (!article) return;
-    const observation = observeArticle(article);
-    if (observation.postId) recentArticles.set(observation.postId, observation);
-  },
-  true,
-);
+let watching = false;
 
-window.addEventListener("message", (event) => {
+void boot();
+
+async function boot(): Promise<void> {
+  if (await isDisclaimerAccepted()) startWatching();
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local") return;
+    if (changes[DISCLAIMER_ACCEPTED_KEY]?.newValue === true) startWatching();
+  });
+}
+
+function startWatching(): void {
+  if (watching) return;
+  watching = true;
+  document.documentElement?.setAttribute(CAPTURE_CONSENT_ATTR, "on");
+  document.addEventListener("click", onLikeClick, true);
+  window.addEventListener("message", onPageMessage);
+  chrome.runtime.onMessage.addListener(onRuntimeMessage);
+  watchSignedInAccount();
+}
+
+function onLikeClick(event: Event): void {
+  const button = likeButtonFromEvent(event);
+  if (!button) return;
+  const article = button.closest('article[data-testid="tweet"]');
+  if (!article) return;
+  const observation = observeArticle(article);
+  if (observation.postId) recentArticles.set(observation.postId, observation);
+}
+
+function onPageMessage(event: MessageEvent): void {
   if (event.origin !== window.location.origin || event.source !== window) return;
   const tweetId = favoriteTweetId(event.data);
   if (!tweetId) return;
   const tweetValue = event.data && typeof event.data === "object" ? (event.data as { tweet?: unknown }).tweet : null;
   void onFavorite(tweetId, tweetValue);
-});
+}
+
+function onRuntimeMessage(message: unknown, _sender: chrome.runtime.MessageSender, sendResponse: (response: unknown) => void): void {
+  if (!isUsernameRequest(message)) return;
+  const account = currentAccount();
+  sendResponse({ username: account?.username ?? null });
+}
 
 async function onFavorite(tweetId: string, tweetValue: unknown): Promise<void> {
+  if (!(await isDisclaimerAccepted())) return;
   if (!(await isCaptureEnabled())) return;
 
   const account = currentAccount();
@@ -84,14 +110,6 @@ function observationFor(postId: string): DomObservation | null {
   if (live) return observeArticle(live);
   return recentArticles.get(postId) ?? null;
 }
-
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (!isUsernameRequest(message)) return;
-  const account = currentAccount();
-  sendResponse({ username: account?.username ?? null });
-});
-
-watchSignedInAccount();
 
 async function sendPayload(payload: LikedPostPayload): Promise<void> {
   await chrome.runtime.sendMessage({ type: "liked-post", payload });

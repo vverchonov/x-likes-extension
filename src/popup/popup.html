@@ -6,7 +6,27 @@
     <title>Likes</title>
     <link rel="stylesheet" href="popup.css" />
   </head>
-  <body>
+  <body class="is-locked">
+    <section id="disclaimer" class="disclaimer">
+      <img class="mark" src="icons/icon32.png" alt="" width="32" height="32" />
+      <h1>Data this extension collects</h1>
+      <p>Nothing is collected until you agree. Likes does not watch X, save your account, or send a like before that.</p>
+      <p>After you agree, liking an original post on X sends:</p>
+      <ul>
+        <li>Your X username and profile picture</li>
+        <li>The post text, images, videos, and link</li>
+        <li>The time you liked it</li>
+      </ul>
+      <p>
+        Replies are not collected. Your signed-in X username is saved on this device so this popup can show that account’s likes and
+        earnings. A wallet address is sent only if you later claim a payout. You can turn capture off in settings.
+      </p>
+      <label class="disclaimer-agree">
+        <input id="disclaimer-agree" type="checkbox" />
+        <span>I understand and agree</span>
+      </label>
+      <button id="disclaimer-continue" type="button" disabled>Continue</button>
+    </section>
     <header class="header">
       <img class="mark" src="icons/icon32.png" alt="Likes" width="32" height="32" />
       <nav class="header-links">

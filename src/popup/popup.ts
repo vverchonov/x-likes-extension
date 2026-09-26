@@ -1,5 +1,6 @@
 import { X_PROFILE_URL, WEBSITE_URL } from "../config.ts";
 import { SIGNED_IN_ACCOUNTS_KEY, sameAccounts } from "../lib/accounts.ts";
+import { acceptDisclaimer, isDisclaimerAccepted } from "../lib/consent.ts";
 import { formatPayout } from "../lib/likes.ts";
 import { isSolanaAddress } from "../lib/solana.ts";
 import { clearEarnings, currentPayout, homePayout, isTestMode, mountTimeline, refreshEarnings, selectClaim, setTestMode } from "./timeline.ts";
@@ -34,8 +35,38 @@ const siteLink = document.querySelector("#site-link");
 
 if (xLink instanceof HTMLAnchorElement) xLink.href = X_PROFILE_URL;
 if (siteLink instanceof HTMLAnchorElement) siteLink.href = WEBSITE_URL;
-if (timeline instanceof HTMLElement) {
-  mountTimeline(timeline, refresh instanceof HTMLButtonElement ? refresh : null);
+
+const disclaimerAgree = document.querySelector("#disclaimer-agree");
+const disclaimerContinue = document.querySelector("#disclaimer-continue");
+let opened = false;
+
+void openPopup();
+
+async function openPopup(): Promise<void> {
+  if (await isDisclaimerAccepted()) {
+    unlockApp();
+    return;
+  }
+  if (!(disclaimerAgree instanceof HTMLInputElement) || !(disclaimerContinue instanceof HTMLButtonElement)) return;
+  disclaimerAgree.addEventListener("change", () => {
+    disclaimerContinue.disabled = !disclaimerAgree.checked;
+  });
+  disclaimerContinue.addEventListener("click", () => {
+    if (!disclaimerAgree.checked) return;
+    disclaimerContinue.disabled = true;
+    void acceptDisclaimer().then(() => {
+      unlockApp();
+    });
+  });
+}
+
+function unlockApp(): void {
+  if (opened) return;
+  opened = true;
+  document.body.classList.remove("is-locked");
+  if (timeline instanceof HTMLElement) {
+    mountTimeline(timeline, refresh instanceof HTMLButtonElement ? refresh : null);
+  }
 }
 
 if (settings instanceof HTMLButtonElement && settingsPanel instanceof HTMLElement) {

@@ -115,7 +115,7 @@ async function refresh(root: HTMLElement, refreshButton: HTMLButtonElement | nul
 
 async function signedInUsername(): Promise<string | null> {
   if (!hasExtensionTabs()) return null;
-  const tabs = await chrome.tabs.query({ url: ["https://x.com/*", "https://twitter.com/*"] });
+  const tabs = await chrome.tabs.query({ url: ["https://x.com/*"] });
   const tab = tabs.find((item) => item.active) ?? tabs[0];
   if (tab?.id == null) return null;
   try {
