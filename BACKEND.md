@@ -1,6 +1,6 @@
 # Backend integration
 
-The extension talks to one URL, `BE_ENDPOINT`. That URL receives a like and, when the popup needs a fresh list, returns likes for every X account the extension has seen that person sign in with. The payout balance is for that same list. There is no auth header and no cookie. The extension calls the URL from its own background worker, so the backend does not need browser CORS for these requests.
+The extension talks to one URL, `BE_ENDPOINT`. In production that URL is `https://api.scrollx.app`. That URL receives a like and, when the popup needs a fresh list, returns likes for every X account the extension has seen that person sign in with. The payout balance is for that same list. There is no auth header and no cookie. The extension calls the URL from its own background worker, so the backend does not need browser CORS for these requests.
 
 A like is sent only after the person has agreed to the data disclaimer, capture is on, and the signed-in X handle can be read. The same POST is sent when that person reposts a post or comments on it. The body is always the original post, including when they reply to a comment under that post. The comment’s own text is not sent. Unlikes and removing a repost are not sent. Nothing is sent before that agreement. If the POST fails, the extension tries once more. The popup does not ask for the list on every like, repost, or comment.
 
@@ -71,7 +71,7 @@ The extension keeps the last successful list for **1 minute**, and only while th
 
 The body is a JSON object with `balance`, `balances`, and a `likes` array. `likes` includes each tracked account. A row’s `username` is the account that liked, reposted, or commented on that post, so the same post can appear once per account. The home screen shows that whole list together, newest `likedAt` first, with `@username` on each row. Post `text` can be the full caption. The popup shows at most three lines. `balance` is the combined USD amount the accounts in `usernames` can receive. A missing or invalid `balance` is shown as `$0.00`. The popup enables **Claim** on the home screen only when that combined `balance` is greater than `5`. At `$5` or below it hides that button and shows “Payouts from $5+”. Home **Claim** pays every account in `usernames` together.
 
-`balances` is one entry per saved account: `{ "username", "balance" }`. The accounts screen lists every handle saved in the extension. **Claim** on a row is enabled only when that account’s balance is greater than `5`, and the claim body then lists only that username. A handle missing from `balances`, or a list request that fails, shows `-` for that row and no claim button. An entry that is present with a missing or invalid `balance` is shown as `$0.00`. Test mode is local to the popup. It does not change this `GET`, and a claim made in test mode is not sent.
+`balances` is one entry per saved account: `{ "username", "balance" }`. The accounts screen lists every handle saved in the extension. **Claim** on a row is enabled only when that account’s balance is greater than `5`, and the claim body then lists only that username. A handle missing from `balances`, or a list request that fails, shows `-` for that row and no claim button. An entry that is present with a missing or invalid `balance` is shown as `$0.00`.
 
 A like is skipped when `postId`, `username`, `url`, or `likedAt` is missing, when `text` is not a string or `null`, or when `media` is not an array of image and video URLs.
 
@@ -112,7 +112,7 @@ Removing an account in the popup only drops it from the saved list. It is not de
 | `wallet` | string | Solana address where the person wants the payout. |
 | `balance` | number | USD amount shown for this claim. Home sends the combined total. A row sends that account’s balance. |
 
-A `2xx` response means the claim was accepted. Any other status is a failure, and the popup lets the person try again. A claim made in test mode is not sent.
+A `2xx` response means the claim was accepted. Any other status is a failure, and the popup lets the person try again.
 
 Home **Claim** and a row **Claim** open a screen for a Solana wallet. **Claim** stays off until the address is a 32-byte Solana public key, then sends the claim above.
 

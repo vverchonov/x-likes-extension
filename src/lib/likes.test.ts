@@ -6,7 +6,6 @@ import {
   isLikedUsername,
   earningsFor,
   LIKES_CACHE_MS,
-  TEST_PAYOUT_BALANCE,
   likesUrl,
   parseLikesList,
   parseLikesResponse,
@@ -133,8 +132,7 @@ describe("canRequestPayout", () => {
     assert.equal(canRequestPayout(5), false);
     assert.equal(canRequestPayout(5.01), true);
     assert.equal(formatPayout(5), "$5.00");
-    assert.equal(canRequestPayout(TEST_PAYOUT_BALANCE), true);
-    assert.equal(formatPayout(TEST_PAYOUT_BALANCE), "$23,467.00");
+    assert.equal(formatPayout(12.5), "$12.50");
   });
 });
 

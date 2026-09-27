@@ -1,6 +1,5 @@
 import { BE_ENDPOINT } from "./config.ts";
 import { SIGNED_IN_ACCOUNTS_KEY, forgetAccount, rememberAccount, rememberedAccounts, sameAccounts } from "./lib/accounts.ts";
-import { isCaptureEnabled } from "./lib/capture.ts";
 import { isDisclaimerAccepted } from "./lib/consent.ts";
 import { httpsUrl } from "./lib/extract.ts";
 import {
@@ -55,7 +54,6 @@ chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) =
 async function deliver(payload: LikedPostPayload): Promise<void> {
   if (!(await isDisclaimerAccepted())) return;
   await storeAccount(payload.username);
-  if (!(await isCaptureEnabled())) return;
   const delivered = await postOnce(payload);
   if (!delivered) {
     const retried = await postOnce(payload);

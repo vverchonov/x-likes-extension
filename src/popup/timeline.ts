@@ -1,7 +1,6 @@
 import {
   type AccountEarning,
   type AccountRow,
-  TEST_PAYOUT_BALANCE,
   canRequestPayout,
   earningsFor,
   formatPayout,
@@ -9,27 +8,16 @@ import {
 } from "../lib/likes.ts";
 import type { LikedPost, MediaItem } from "../lib/types.ts";
 
-const TEST_USERNAME = "test";
-
 type PayoutTarget = { username: string; balance: number; accounts: string[] };
 
 let payoutAccount: PayoutTarget | null = null;
 let claimSelection: PayoutTarget | null = null;
-let accountRows: AccountRow[] = [];
-let testMode = false;
 let reload: ((force: boolean) => Promise<void>) | null = null;
 let timelineRoot: HTMLElement | null = null;
 let latestPosts: LikedPost[] = [];
 let timelineMessage: string | null = "Loading";
 
 export function homePayout(): PayoutTarget | null {
-  if (testMode) {
-    return {
-      username: payoutAccount?.username ?? TEST_USERNAME,
-      balance: TEST_PAYOUT_BALANCE,
-      accounts: payoutAccount?.accounts.length ? payoutAccount.accounts : [TEST_USERNAME],
-    };
-  }
   return payoutAccount;
 }
 
@@ -57,17 +45,6 @@ export function clearEarnings(): void {
   claimSelection = null;
   showPayout();
   renderAccounts([]);
-}
-
-export function setTestMode(enabled: boolean): void {
-  testMode = enabled;
-  showPayout();
-  renderAccounts(accountRows);
-  paintTimeline();
-}
-
-export function isTestMode(): boolean {
-  return testMode;
 }
 
 export function mountTimeline(root: HTMLElement, refreshButton: HTMLButtonElement | null): void {
@@ -189,29 +166,18 @@ function renderPayout(balance: number): void {
   if (minimum instanceof HTMLElement) minimum.hidden = allowed;
 }
 
-function shownAccounts(rows: AccountRow[]): AccountRow[] {
-  if (!testMode) return rows;
-  const source = rows.length > 0 ? rows : [{ username: TEST_USERNAME, balance: null }];
-  return source.map((row) => ({
-    username: row.username,
-    balance: row.balance != null && canRequestPayout(row.balance) ? row.balance : TEST_PAYOUT_BALANCE,
-  }));
-}
-
 function renderAccounts(rows: AccountRow[], emptyText = "No accounts yet"): void {
-  accountRows = rows;
-  const shown = shownAccounts(rows);
   const list = document.querySelector("#accounts-list");
   if (!(list instanceof HTMLElement)) return;
   list.replaceChildren();
-  if (shown.length === 0) {
+  if (rows.length === 0) {
     const empty = document.createElement("p");
     empty.className = "empty";
     empty.textContent = emptyText;
     list.append(empty);
     return;
   }
-  for (const row of shown) list.append(renderAccount(row));
+  for (const row of rows) list.append(renderAccount(row));
 }
 
 function renderAccount(row: AccountRow): HTMLElement {
@@ -259,60 +225,6 @@ function renderAccount(row: AccountRow): HTMLElement {
   return article;
 }
 
-type PostPreview = {
-  post: LikedPost;
-  imagePlaceholder: boolean;
-  contentPlaceholder: boolean;
-};
-
-const TEST_POSTS: PostPreview[] = [
-  {
-    imagePlaceholder: true,
-    contentPlaceholder: false,
-    post: {
-      postId: "test-coin",
-      username: TEST_USERNAME,
-      avatarUrl: null,
-      text: "Liked a post that created a coin",
-      media: [],
-      url: "https://x.com/i/status/1",
-      likedAt: "2026-09-23T18:00:00.000Z",
-      coinUrl: "https://pump.fun/coin/test",
-      earning: 18.4,
-    },
-  },
-  {
-    imagePlaceholder: false,
-    contentPlaceholder: false,
-    post: {
-      postId: "test-no-earning",
-      username: TEST_USERNAME,
-      avatarUrl: null,
-      text: "Liked a post with a coin and no earnings",
-      media: [],
-      url: "https://x.com/i/status/2",
-      likedAt: "2026-09-23T17:00:00.000Z",
-      coinUrl: "https://pump.fun/coin/quiet",
-      earning: null,
-    },
-  },
-  {
-    imagePlaceholder: true,
-    contentPlaceholder: true,
-    post: {
-      postId: "test-no-coin",
-      username: TEST_USERNAME,
-      avatarUrl: null,
-      text: null,
-      media: [],
-      url: "https://x.com/i/status/3",
-      likedAt: "2026-09-23T16:00:00.000Z",
-      coinUrl: null,
-      earning: null,
-    },
-  },
-];
-
 function showTimelinePosts(posts: LikedPost[]): void {
   latestPosts = posts;
   timelineMessage = posts.length === 0 ? "No likes yet" : null;
@@ -327,18 +239,12 @@ function showTimelineMessage(text: string): void {
 
 function paintTimeline(): void {
   if (!timelineRoot) return;
-  if (!testMode && timelineMessage) {
+  if (timelineMessage) {
     renderStatus(timelineRoot, timelineMessage);
     return;
   }
   timelineRoot.replaceChildren();
-  if (testMode) {
-    for (const preview of TEST_POSTS) {
-      timelineRoot.append(renderPost(preview.post, preview.imagePlaceholder, preview.contentPlaceholder));
-    }
-    return;
-  }
-  for (const post of latestPosts) timelineRoot.append(renderPost(post, false, false));
+  for (const post of latestPosts) timelineRoot.append(renderPost(post));
 }
 
 function renderStatus(root: HTMLElement, text: string): void {
@@ -349,22 +255,18 @@ function renderStatus(root: HTMLElement, text: string): void {
   root.append(empty);
 }
 
-function renderPost(post: LikedPost, imagePlaceholder: boolean, contentPlaceholder: boolean): HTMLElement {
+function renderPost(post: LikedPost): HTMLElement {
   const article = document.createElement("article");
   article.className = "post";
 
-  if (contentPlaceholder) {
-    article.append(contentSlot());
-  } else if (post.text) {
+  if (post.text) {
     const text = document.createElement("p");
     text.className = "text";
     text.textContent = post.text;
     article.append(text);
   }
 
-  if (imagePlaceholder) {
-    article.append(imageSlot());
-  } else if (post.media.length > 0) {
+  if (post.media.length > 0) {
     const media = document.createElement("div");
     media.className = "media";
     for (const item of post.media) media.append(renderMedia(item));
@@ -399,26 +301,6 @@ function renderPost(post: LikedPost, imagePlaceholder: boolean, contentPlacehold
   meta.append(who, links);
   article.append(meta);
   return article;
-}
-
-function imageSlot(): HTMLElement {
-  const slot = document.createElement("div");
-  slot.className = "image-placeholder";
-  slot.setAttribute("role", "img");
-  slot.setAttribute("aria-label", "Image");
-  slot.innerHTML =
-    '<svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path fill="currentColor" d="M21 19V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>';
-  return slot;
-}
-
-function contentSlot(): HTMLElement {
-  const slot = document.createElement("div");
-  slot.className = "content-placeholder";
-  slot.setAttribute("aria-label", "Post content");
-  for (let index = 0; index < 3; index += 1) {
-    slot.append(document.createElement("span"));
-  }
-  return slot;
 }
 
 function earningLabel(amount: number): HTMLElement {

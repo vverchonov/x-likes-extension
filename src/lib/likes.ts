@@ -7,7 +7,6 @@ export { isLikedUsername };
 
 export const LIKES_CACHE_MS = 60_000;
 export const PAYOUT_MINIMUM = 5;
-export const TEST_PAYOUT_BALANCE = 23467;
 
 export type AccountEarning = {
   username: string;

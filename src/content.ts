@@ -1,4 +1,3 @@
-import { isCaptureEnabled } from "./lib/capture.ts";
 import { CAPTURE_CONSENT_ATTR, DISCLAIMER_ACCEPTED_KEY, isDisclaimerAccepted } from "./lib/consent.ts";
 import { findArticleByStatusId, observeArticle, rootPostOnStatusPage, type DomObservation } from "./lib/dom.ts";
 import {
@@ -62,7 +61,6 @@ function onRuntimeMessage(message: unknown, _sender: chrome.runtime.MessageSende
 
 async function onEngagement(engagement: PageEngagement): Promise<void> {
   if (!(await isDisclaimerAccepted())) return;
-  if (!(await isCaptureEnabled())) return;
 
   const account = currentAccount();
   if (!account) return;

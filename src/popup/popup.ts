@@ -3,14 +3,10 @@ import { SIGNED_IN_ACCOUNTS_KEY, sameAccounts } from "../lib/accounts.ts";
 import { acceptDisclaimer, isDisclaimerAccepted } from "../lib/consent.ts";
 import { formatPayout } from "../lib/likes.ts";
 import { isSolanaAddress } from "../lib/solana.ts";
-import { clearEarnings, currentPayout, homePayout, isTestMode, mountTimeline, refreshEarnings, selectClaim, setTestMode } from "./timeline.ts";
+import { clearEarnings, currentPayout, homePayout, mountTimeline, refreshEarnings, selectClaim } from "./timeline.ts";
 
-const toggle = document.querySelector("#capture-toggle");
-const testMode = document.querySelector("#test-mode");
 const timeline = document.querySelector("#timeline");
 const refresh = document.querySelector("#refresh");
-const settings = document.querySelector("#settings");
-const settingsPanel = document.querySelector("#settings-panel");
 const payoutButton = document.querySelector("#payout-button");
 const home = document.querySelector("#home");
 const accounts = document.querySelector("#accounts");
@@ -35,6 +31,9 @@ const siteLink = document.querySelector("#site-link");
 
 if (xLink instanceof HTMLAnchorElement) xLink.href = X_PROFILE_URL;
 if (siteLink instanceof HTMLAnchorElement) siteLink.href = WEBSITE_URL;
+
+const docsLink = document.querySelector("#docs-link");
+if (docsLink instanceof HTMLAnchorElement) docsLink.href = new URL("/docs", WEBSITE_URL).href;
 
 const disclaimerAgree = document.querySelector("#disclaimer-agree");
 const disclaimerContinue = document.querySelector("#disclaimer-continue");
@@ -67,14 +66,6 @@ function unlockApp(): void {
   if (timeline instanceof HTMLElement) {
     mountTimeline(timeline, refresh instanceof HTMLButtonElement ? refresh : null);
   }
-}
-
-if (settings instanceof HTMLButtonElement && settingsPanel instanceof HTMLElement) {
-  settings.addEventListener("click", () => {
-    const open = settingsPanel.hasAttribute("hidden");
-    settingsPanel.toggleAttribute("hidden", !open);
-    settings.setAttribute("aria-expanded", open ? "true" : "false");
-  });
 }
 
 type Screen = "home" | "accounts" | "claim" | "processing";
@@ -149,10 +140,6 @@ if (
     event.preventDefault();
     const payout = currentPayout();
     if (!payout || !isSolanaAddress(wallet.value)) return;
-    if (isTestMode()) {
-      showScreen("processing");
-      return;
-    }
     claimButton.disabled = true;
     void claimPayout(payout.username, wallet.value.trim(), payout.balance, payout.accounts).then((ok) => {
       claimStatus.hidden = false;
@@ -202,37 +189,9 @@ if (
     claimView.hidden = screen !== "claim";
     processingView.hidden = screen !== "processing";
     footerView.hidden = screen === "claim" || screen === "processing";
-    if (settingsPanel instanceof HTMLElement && screen !== "home" && screen !== "accounts") {
-      settingsPanel.hidden = true;
-      if (settings instanceof HTMLButtonElement) settings.setAttribute("aria-expanded", "false");
-    }
     markTab(homeTab, screen === "home");
     markTab(accountsTab, screen === "accounts");
   }
-}
-
-if (toggle instanceof HTMLButtonElement) {
-  void readEnabled().then((enabled) => {
-    render(toggle, enabled);
-  });
-
-  toggle.addEventListener("click", () => {
-    const next = toggle.getAttribute("aria-checked") !== "true";
-    render(toggle, next);
-    void writeEnabled(next);
-  });
-}
-
-if (testMode instanceof HTMLButtonElement) {
-  void readTestMode().then((enabled) => {
-    renderTestMode(testMode, enabled);
-  });
-
-  testMode.addEventListener("click", () => {
-    const next = testMode.getAttribute("aria-pressed") !== "true";
-    renderTestMode(testMode, next);
-    void writeTestMode(next);
-  });
 }
 
 watchAccountList();
@@ -284,47 +243,6 @@ async function forgetAccount(username: string): Promise<void> {
   await chrome.runtime.sendMessage({ type: "forget-account", username });
 }
 
-function render(button: HTMLButtonElement, enabled: boolean): void {
-  button.setAttribute("aria-checked", enabled ? "true" : "false");
-}
-
-function renderTestMode(button: HTMLButtonElement, enabled: boolean): void {
-  button.setAttribute("aria-pressed", enabled ? "true" : "false");
-  setTestMode(enabled);
-}
-
-async function readEnabled(): Promise<boolean> {
-  if (hasExtensionStorage()) {
-    const stored = await chrome.storage.local.get({ captureEnabled: true });
-    return stored.captureEnabled !== false;
-  }
-  return localStorage.getItem("captureEnabled") !== "false";
-}
-
-async function writeEnabled(enabled: boolean): Promise<void> {
-  if (hasExtensionStorage()) {
-    await chrome.storage.local.set({ captureEnabled: enabled });
-    return;
-  }
-  localStorage.setItem("captureEnabled", String(enabled));
-}
-
-async function readTestMode(): Promise<boolean> {
-  if (hasExtensionStorage()) {
-    const stored = await chrome.storage.local.get({ testMode: false });
-    return stored.testMode === true;
-  }
-  return localStorage.getItem("testMode") === "true";
-}
-
-async function writeTestMode(enabled: boolean): Promise<void> {
-  if (hasExtensionStorage()) {
-    await chrome.storage.local.set({ testMode: enabled });
-    return;
-  }
-  localStorage.setItem("testMode", String(enabled));
-}
-
 async function claimPayout(
   username: string,
   walletAddress: string,
@@ -340,8 +258,4 @@ async function claimPayout(
     balance,
   });
   return Boolean(response) && typeof response === "object" && (response as { ok?: unknown }).ok === true;
-}
-
-function hasExtensionStorage(): boolean {
-  return typeof chrome !== "undefined" && Boolean(chrome.storage?.local);
 }
