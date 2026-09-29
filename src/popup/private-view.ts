@@ -31,7 +31,7 @@ export function setClaim(next: Claim): void { claim = next; paintClaim(); }
 
 export function mountPrivateView(): void {
   document.querySelector("#refresh")?.addEventListener("click", () => { void refreshPrivateView(true); });
-  void refreshPrivateView(false);
+  void refreshPrivateView(true);
   void refreshClaimStatus();
   window.setInterval(() => { if (claim && (claim.status === "pending" || claim.status === "held")) void refreshClaimStatus(); }, 15_000);
 }
