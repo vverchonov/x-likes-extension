@@ -1,4 +1,4 @@
-import { type Balances, type Claim, type EventRow, type TrackedAccount, formatSol, parseBalances, parseClaim, parseEvents, trackedAccounts } from "../lib/private-data.ts";
+import { type Balances, type Claim, type EventRow, type TrackedAccount, formatSol, formatUsd, parseBalances, parseClaim, parseEvents, trackedAccounts } from "../lib/private-data.ts";
 
 type Selection = { xUserIds: string[]; balance: string };
 type Snapshot = { accounts: TrackedAccount[]; events: EventRow[] | null; nextCursor: string | null; balances: Balances | null };
@@ -56,8 +56,8 @@ export async function refreshPrivateView(force: boolean): Promise<void> {
       cursor = null;
       selected = null;
       const saved = trackedAccounts(response.accounts);
-      paintMessage(timeline, response.reason === "no-account" ? "Open X to load likes" : "Couldn't load likes");
-      paintMessage(accounts, response.reason === "no-account" ? "No accounts yet" : "Couldn't load accounts or SOL balances");
+      paintMessage(timeline, response.reason === "no-account" ? "Open X to load engagements" : "Failed to load");
+      paintMessage(accounts, response.reason === "no-account" ? "No accounts yet" : "Couldn't load accounts or balances");
       if (saved.length) paintAccounts(saved, null);
       paintBalance();
       paintClaim();
@@ -81,8 +81,8 @@ export async function refreshPrivateView(force: boolean): Promise<void> {
     snapshot = null;
     claim = null;
     cursor = null;
-    paintMessage(timeline, "Couldn't load history");
-    paintMessage(accounts, "Couldn't load accounts or SOL balances");
+    paintMessage(timeline, "Failed to load");
+    paintMessage(accounts, "Couldn't load accounts or balances");
     paintBalance();
     paintClaim();
   } finally {
@@ -101,7 +101,7 @@ function paintBalance(): void {
   const balance = document.querySelector("#payout-balance");
   const minimum = document.querySelector("#payout-minimum");
   const button = document.querySelector("#payout-button");
-  if (balance) balance.textContent = snapshot?.balances ? `${formatSol(snapshot.balances.combined.availableLamports)} available` : "– SOL";
+  if (balance) balance.textContent = snapshot?.balances ? availableUsd(snapshot.balances.combined.availableLamports, snapshot.balances.claimEligibility.solUsd) : "– USD";
   const selection = homeSelection();
   if (minimum instanceof HTMLElement) {
     minimum.hidden = Boolean(selection);
@@ -110,6 +110,11 @@ function paintBalance(): void {
   if (button instanceof HTMLButtonElement) {
     button.hidden = !selection;
   }
+}
+
+function availableUsd(lamports: string, quote: string | null): string {
+  const usd = formatUsd(lamports, quote);
+  return usd ? `${usd} available` : "USD unavailable";
 }
 
 function eligibilityText(balances: Balances): string {
@@ -139,7 +144,7 @@ function paintAccounts(accounts: TrackedAccount[], balances: Balances | null): v
     name.textContent = `@${account.username}`;
     const balance = document.createElement("p");
     balance.className = "account-balance";
-    balance.textContent = amount ? formatSol(amount.availableLamports) : "–";
+    balance.textContent = amount ? availableUsd(amount.availableLamports, balances?.claimEligibility.solUsd ?? null) : "– USD";
     main.append(name, balance);
     const actions = document.createElement("div");
     actions.className = "account-actions";
@@ -176,7 +181,7 @@ function paintHistory(events: EventRow[] | null): void {
   if (!events?.length) {
     const empty = document.createElement("p");
     empty.className = "empty";
-    empty.textContent = events === null ? "Couldn't load likes" : "No likes yet";
+    empty.textContent = events === null ? "Failed to load" : "No engagements yet";
     root.append(empty);
   }
   if (events === null) return;
@@ -230,12 +235,19 @@ function paintHistory(events: EventRow[] | null): void {
       if (event.creatorEarningsLamports !== null) {
         const earning = document.createElement("span");
         earning.className = "coin-earning";
-        earning.textContent = `attributed ${formatSol(event.creatorEarningsLamports)}`;
+        earning.textContent = `attributed ${formatUsd(event.creatorEarningsLamports, snapshot?.balances?.claimEligibility.solUsd ?? null) ?? "USD unavailable"} · may not be claimable`;
         earning.title = "Attributed rewards may not be claimable by this key";
         links.append(earning);
       }
     }
     meta.append(who, links);
+    const statusText = activityStatus(event.processingStatus);
+    if (statusText) {
+      const status = document.createElement("p");
+      status.className = "activity-status";
+      status.textContent = statusText;
+      meta.append(status);
+    }
     article.append(meta);
     root.append(article);
   }
@@ -246,6 +258,23 @@ function paintHistory(events: EventRow[] | null): void {
     more.textContent = "Load more";
     more.addEventListener("click", () => { void loadMore(more); });
     root.append(more);
+  }
+}
+
+function activityStatus(status: EventRow["processingStatus"]): string | null {
+  switch (status) {
+    case "finalized": return null;
+    case "rejected": return "This post wasn't selected for a coin.";
+    case "failed": return "We couldn't create a coin for this post.";
+    case "pending":
+    case "deferred":
+    case "grounding":
+    case "filtering":
+    case "generating":
+    case "ready":
+    case "sending":
+    case "unresolved": return "Pending";
+    default: return "Status unavailable";
   }
 }
 
@@ -266,9 +295,9 @@ async function loadMore(button: HTMLButtonElement): Promise<void> {
   } catch { if (refreshId === requestedRefresh) { button.disabled = false; button.textContent = "Retry load more"; } }
 }
 
-function paintClaim(): void {
+function paintClaim(refreshFailed = false): void {
   const status = document.querySelector("#latest-claim");
-  if (status) status.textContent = claim ? `Claim ${claim.status}: ${formatSol(claim.amountLamports)} to ${claim.destination}${claim.transactionSignature && claim.status === "confirmed" ? ` · signature ${claim.transactionSignature}` : ""}` : "";
+  if (status) status.textContent = claim ? `Claim ${claim.status}: ${formatSol(claim.amountLamports)} to ${claim.destination}${claim.transactionSignature && claim.status === "confirmed" ? ` · signature ${claim.transactionSignature}` : ""}${refreshFailed ? " (last known). Couldn't refresh claim status." : ""}` : "";
 }
 
 export async function refreshClaimStatus(): Promise<void> {
@@ -278,7 +307,6 @@ export async function refreshClaimStatus(): Promise<void> {
     const next = (response as { claim?: unknown }).claim;
     if (next) { claim = parseClaim(next); paintClaim(); }
   } catch {
-    const status = document.querySelector("#latest-claim");
-    if (status && claim) status.textContent = `Claim ${claim.status} (last known). Couldn't refresh claim status.`;
+    if (claim) paintClaim(true);
   }
 }

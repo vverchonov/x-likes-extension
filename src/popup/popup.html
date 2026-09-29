@@ -37,7 +37,7 @@
     </header>
     <div id="home" class="home">
     <section class="payout" aria-label="Payout">
-      <p id="payout-balance" class="payout-balance">– SOL</p>
+      <p id="payout-balance" class="payout-balance">– USD</p>
       <button id="payout-button" class="payout-button" type="button" hidden>Claim</button>
       <p id="payout-minimum" class="payout-minimum">Loading balances…</p>
     </section>
@@ -111,6 +111,7 @@
         Back
       </button>
       <form id="claim-form" class="claim-form">
+        <p class="hint">USD balances are estimates. Claims are currently paid only in SOL.</p>
         <label for="wallet">SOL wallet</label>
         <input id="wallet" name="wallet" type="text" autocomplete="off" spellcheck="false" placeholder="Wallet address" aria-describedby="wallet-error" />
         <label for="wallet-confirm">Confirm destination address</label>

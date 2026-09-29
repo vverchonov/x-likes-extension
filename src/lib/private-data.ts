@@ -4,7 +4,7 @@ import { isSolanaAddress } from "./solana.ts";
 import type { LikedPostPayload } from "./types.ts";
 
 export type TrackedAccount = { xUserId: string; username: string };
-export type ProcessingStatus = "pending" | "deferred" | "grounding" | "filtering" | "rejected" | "manual_review" | "generating" | "ready" | "sending" | "unresolved" | "finalized" | "failed";
+export type ProcessingStatus = "pending" | "deferred" | "grounding" | "filtering" | "rejected" | "generating" | "ready" | "sending" | "unresolved" | "finalized" | "failed";
 export type EventRow = LikedPostPayload & { id: string; xUserId: string; intentId: string; receivedAt: string; status: "received"; processingStatus: ProcessingStatus; tokenUrl: string | null; creatorEarningsLamports: string | null };
 export type Balance = { xUserId: string; availableLamports: string; pendingLamports: string; claimedLamports: string; paused: boolean };
 export type EligibilityReason = "below_minimum" | "quote_unavailable" | "quote_stale" | "disputed" | "unauthorized";
@@ -34,7 +34,7 @@ export function parseEvents(value: unknown): { events: EventRow[]; nextCursor: s
   if (!value || typeof value !== "object") throw new Error("Invalid history");
   const { events, nextCursor } = value as { events?: unknown; nextCursor?: unknown };
   if (!Array.isArray(events) || !(nextCursor === null || typeof nextCursor === "string" && nextCursor.length > 0)) throw new Error("Invalid history");
-  const statuses: ProcessingStatus[] = ["pending", "deferred", "grounding", "filtering", "rejected", "manual_review", "generating", "ready", "sending", "unresolved", "finalized", "failed"];
+  const statuses: ProcessingStatus[] = ["pending", "deferred", "grounding", "filtering", "rejected", "generating", "ready", "sending", "unresolved", "finalized", "failed"];
   const rows = events.map((item) => {
     const post = parseLikedPost(item);
     const row = item as Partial<EventRow>;
@@ -74,4 +74,16 @@ export function formatSol(value: string): string {
   const whole = amount / 1_000_000_000n;
   const fraction = (amount % 1_000_000_000n).toString().padStart(9, "0").replace(/0+$/, "");
   return `${whole}${fraction ? `.${fraction}` : ""} SOL`;
+}
+
+export function formatUsd(lamportAmount: string, solUsd: string | null): string | null {
+  if (!solUsd || !/^\d+(?:\.\d+)?$/.test(solUsd)) return null;
+  const [whole = "0", fraction = ""] = solUsd.split(".");
+  const price = BigInt(whole + fraction);
+  if (price === 0n) return null;
+  const numerator = BigInt(lamportAmount) * price * 100n;
+  const denominator = 1_000_000_000n * 10n ** BigInt(fraction.length);
+  const cents = (numerator + denominator / 2n) / denominator;
+  if (numerator > 0n && cents === 0n) return "<$0.01";
+  return `$${new Intl.NumberFormat("en-US").format(cents / 100n)}.${(cents % 100n).toString().padStart(2, "0")}`;
 }
