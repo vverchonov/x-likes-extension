@@ -854,10 +854,8 @@ body:not(.is-locked) .disclaimer {
 
 .coin-earning {
   flex-basis: 100%;
-  text-align: right;
-  color: #fff;
+  color: var(--muted);
   font-size: 12px;
-  font-weight: 700;
   line-height: 16px;
 }
 

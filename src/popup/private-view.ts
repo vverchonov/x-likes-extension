@@ -232,10 +232,10 @@ function paintHistory(events: EventRow[] | null): void {
       token.href = event.tokenUrl;
       token.textContent = "view coin";
       links.append(token);
-      if (event.creatorEarningsLamports !== null) {
+      if (event.creatorEarningsLamports !== null && BigInt(event.creatorEarningsLamports) > 0n) {
         const earning = document.createElement("span");
         earning.className = "coin-earning";
-        earning.textContent = `attributed ${formatUsd(event.creatorEarningsLamports, snapshot?.balances?.claimEligibility.solUsd ?? null) ?? "USD unavailable"} · may not be claimable`;
+        earning.textContent = `Attributed coin rewards: ${formatUsd(event.creatorEarningsLamports, snapshot?.balances?.claimEligibility.solUsd ?? null) ?? formatSol(event.creatorEarningsLamports)}`;
         earning.title = "Attributed rewards may not be claimable by this key";
         links.append(earning);
       }
