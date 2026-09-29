@@ -2,7 +2,7 @@ import { X_PROFILE_URL, WEBSITE_URL } from "../config.ts";
 import { acceptDisclaimer, isDisclaimerAccepted } from "../lib/consent.ts";
 import { formatSol } from "../lib/private-data.ts";
 import { isSolanaAddress } from "../lib/solana.ts";
-import { clearClaimHistory, currentSelection, homeSelection, mountPrivateView, refreshClaimHistory, refreshClaimStatus, refreshPrivateView, rowSelection, selectClaim, setClaim } from "./private-view.ts";
+import { allAccountsSelection, clearClaimHistory, currentSelection, mountPrivateView, refreshClaimHistory, refreshClaimStatus, refreshPrivateView, rowSelection, selectClaim, setClaim } from "./private-view.ts";
 
 const toggle = document.querySelector("#capture-toggle");
 const settings = document.querySelector("#settings");
@@ -15,7 +15,6 @@ const identityImport = document.querySelector("#identity-import");
 const identityImportButton = document.querySelector("#identity-import-button");
 const identityStatus = document.querySelector("#identity-status");
 const identityPublicKey = document.querySelector("#identity-public-key");
-const payoutButton = document.querySelector("#payout-button");
 const home = document.querySelector("#home");
 const accounts = document.querySelector("#accounts");
 const activity = document.querySelector("#activity");
@@ -24,7 +23,7 @@ const confirmAccount = document.querySelector("#confirm-account");
 const confirmCancel = document.querySelector("#confirm-cancel");
 const confirmRemoveButton = document.querySelector("#confirm-remove-button");
 const navHome = document.querySelector("#nav-home");
-const navAccounts = document.querySelector("#nav-accounts");
+const navFeed = document.querySelector("#nav-feed");
 const navActivity = document.querySelector("#nav-activity");
 const footer = document.querySelector(".footer");
 const claim = document.querySelector("#claim");
@@ -36,6 +35,7 @@ const claimButton = document.querySelector("#claim-button");
 const claimStatus = document.querySelector("#claim-status");
 const processing = document.querySelector("#processing");
 const processingDone = document.querySelector("#processing-done");
+const dock = document.querySelector("#dock");
 const xLink = document.querySelector("#x-link");
 const siteLink = document.querySelector("#site-link");
 
@@ -49,6 +49,38 @@ const disclaimerContinue = document.querySelector("#disclaimer-continue");
 let opened = false;
 
 void openPopup();
+void prepareDock();
+
+const docked = location.pathname.endsWith("/sidepanel.html");
+let browserWindowId: number | null = null;
+
+async function prepareDock(): Promise<void> {
+  if (!(dock instanceof HTMLButtonElement) || typeof chrome === "undefined" || !chrome.sidePanel?.open || !chrome.windows?.getCurrent) return;
+  browserWindowId = await browserWindow();
+  dock.hidden = false;
+  dock.disabled = browserWindowId === null;
+  dock.setAttribute("aria-pressed", String(docked));
+  dock.setAttribute("aria-label", docked ? "Back to popup" : "Open beside the page");
+  dock.addEventListener("click", () => {
+    if (browserWindowId === null || !chrome.sidePanel) return;
+    const windowId = browserWindowId;
+    if (docked) {
+      void chrome.sidePanel.close({ windowId });
+      return;
+    }
+    void chrome.sidePanel.open({ windowId }).then(() => window.close());
+  });
+}
+
+async function browserWindow(): Promise<number | null> {
+  const current = await chrome.windows.getCurrent();
+  if (current.type !== "popup" && current.id !== undefined) return current.id;
+  const windows = await chrome.windows.getAll({ windowTypes: ["normal"] }).catch(() => []);
+  const browser = windows.find((entry) => entry.focused && entry.id !== undefined) ?? windows.find((entry) => entry.id !== undefined);
+  if (browser?.id !== undefined) return browser.id;
+  const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true }).catch(() => []);
+  return tab?.windowId ?? null;
+}
 
 async function openPopup(): Promise<void> {
   if (await isDisclaimerAccepted()) {
@@ -143,17 +175,16 @@ if (identityImport instanceof HTMLTextAreaElement && identityImportButton instan
   });
 }
 
-type Screen = "home" | "accounts" | "activity" | "settings" | "claim" | "processing";
+type Screen = "home" | "feed" | "activity" | "settings" | "claim" | "processing";
 
-let claimOrigin: "home" | "accounts" = "home";
+let claimOrigin: "home" = "home";
 
 if (
-  payoutButton instanceof HTMLButtonElement &&
   home instanceof HTMLElement &&
   accounts instanceof HTMLElement &&
   activity instanceof HTMLElement &&
   navHome instanceof HTMLButtonElement &&
-  navAccounts instanceof HTMLButtonElement &&
+  navFeed instanceof HTMLButtonElement &&
   navActivity instanceof HTMLButtonElement &&
   settings instanceof HTMLButtonElement &&
   settingsPanel instanceof HTMLElement &&
@@ -172,9 +203,9 @@ if (
     closeRemoveConfirm();
     showScreen("home");
   });
-  navAccounts.addEventListener("click", () => {
+  navFeed.addEventListener("click", () => {
     closeRemoveConfirm();
-    showScreen("accounts");
+    showScreen("feed");
   });
   navActivity.addEventListener("click", () => {
     closeRemoveConfirm();
@@ -186,20 +217,20 @@ if (
     showScreen(settingsPanel.hidden ? "settings" : "home");
   });
 
-  payoutButton.addEventListener("click", () => {
-    const payout = homeSelection();
-    if (!payout) return;
-    void checkClaim(payout.xUserIds).then((allowed) => {
-      if (!allowed) return;
-      claimOrigin = "home";
-      selectClaim(payout);
-      openClaim();
-    });
-  });
-
   accounts.addEventListener("click", (event) => {
     const button = event.target instanceof Element ? event.target.closest("button") : null;
     if (!(button instanceof HTMLButtonElement)) return;
+    if (button.dataset.action === "claim-all") {
+      const selection = allAccountsSelection();
+      if (!selection) return;
+      void checkClaim(selection.xUserIds).then((allowed) => {
+        if (!allowed) return;
+        claimOrigin = "home";
+        selectClaim(selection);
+        openClaim();
+      });
+      return;
+    }
     const xUserId = button.dataset.xUserId;
     if (!xUserId) return;
     if (button.dataset.action === "remove") {
@@ -211,7 +242,7 @@ if (
     if (!selection) return;
     void checkClaim(selection.xUserIds).then((allowed) => {
       if (!allowed) return;
-      claimOrigin = "accounts";
+      claimOrigin = "home";
       selectClaim(selection);
       openClaim();
     });
@@ -269,7 +300,7 @@ if (
   const claimSubmit = claimButton;
   const claimMessage = claimStatus;
   const homeTab = navHome;
-  const accountsTab = navAccounts;
+  const feedTab = navFeed;
   const activityTab = navActivity;
 
   function openClaim(): void {
@@ -294,8 +325,8 @@ if (
       if (identityImport instanceof HTMLTextAreaElement) identityImport.value = "";
       if (identityImportButton instanceof HTMLButtonElement) identityImportButton.disabled = true;
     }
-    homeView.hidden = screen !== "home";
-    accountsView.hidden = screen !== "accounts";
+    homeView.hidden = screen !== "feed";
+    accountsView.hidden = screen !== "home";
     activityView.hidden = screen !== "activity";
     settingsView.hidden = screen !== "settings";
     settingsButton.setAttribute("aria-expanded", String(screen === "settings"));
@@ -303,7 +334,7 @@ if (
     processingView.hidden = screen !== "processing";
     footerView.hidden = screen === "claim" || screen === "processing";
     markTab(homeTab, screen === "home");
-    markTab(accountsTab, screen === "accounts");
+    markTab(feedTab, screen === "feed");
     markTab(activityTab, screen === "activity");
   }
 }

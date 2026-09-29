@@ -28,7 +28,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 
 chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
-  if (sender.id === chrome.runtime.id && sender.url === chrome.runtime.getURL("popup.html") && message && typeof message === "object") {
+  if (isPopupSender(sender) && message && typeof message === "object") {
     const request = message as { type?: unknown; backup?: unknown };
     if (request.type === "identity-setup" || request.type === "identity-backup" || request.type === "identity-import") {
       void (async () => {
@@ -118,7 +118,9 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
 });
 
 function isPopupSender(sender: chrome.runtime.MessageSender): boolean {
-  return sender.id === chrome.runtime.id && sender.url === chrome.runtime.getURL("popup.html");
+  const popup = chrome.runtime.getURL("popup.html");
+  const panel = chrome.runtime.getURL("sidepanel.html");
+  return sender.id === chrome.runtime.id && (sender.url === popup || sender.url === panel);
 }
 
 function isContentSender(sender: chrome.runtime.MessageSender): boolean {

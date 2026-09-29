@@ -1,3 +1,6 @@
+import { WEBSITE_URL } from "../config.ts";
+import { isLikedUsername } from "../lib/accounts.ts";
+import { stripTrailingMediaLinks } from "../lib/extract.ts";
 import { type Balances, type Claim, type ClaimHistory, type EventRow, type TrackedAccount, formatSol, formatUsd, parseBalances, parseClaim, parseClaimHistory, parseEvents, trackedAccounts } from "../lib/private-data.ts";
 
 type Selection = { xUserIds: string[]; balance: string };
@@ -14,7 +17,7 @@ let cursor: string | null = null;
 let selected: Selection | null = null;
 
 export function currentSelection(): Selection | null { return selected; }
-export function homeSelection(): Selection | null {
+export function allAccountsSelection(): Selection | null {
   if (!snapshot?.balances || snapshot.balances.accounts.length !== snapshot.accounts.length || !snapshot.balances.claimEligibility.available || snapshot.balances.accounts.some((account) => account.paused)) return null;
   return { xUserIds: snapshot.accounts.map((account) => account.xUserId), balance: snapshot.balances.combined.availableLamports };
 }
@@ -25,9 +28,19 @@ export function rowSelection(id: string): Selection | null {
   return { xUserIds: [id], balance: account.availableLamports };
 }
 function meetsMinimum(lamports: string, price: string | null): boolean {
-  if (!price || !/^\d+(?:\.\d{1,9})?$/.test(price)) return false;
+  const product = usdProduct(lamports, price);
+  return product !== null && product >= 5n * 10n ** 18n;
+}
+
+function aboveMinimum(lamports: string, price: string | null): boolean {
+  const product = usdProduct(lamports, price);
+  return product !== null && product > 5n * 10n ** 18n;
+}
+
+function usdProduct(lamports: string, price: string | null): bigint | null {
+  if (!price || !/^\d+(?:\.\d{1,9})?$/.test(price)) return null;
   const [whole = "0", decimal = ""] = price.split(".");
-  return BigInt(lamports) * BigInt(whole + decimal.padEnd(9, "0")) >= 5n * 10n ** 18n;
+  return BigInt(lamports) * BigInt(whole + decimal.padEnd(9, "0"));
 }
 export function selectClaim(selection: Selection): void { selected = selection; }
 export function lastClaim(): Claim | null { return claim; }
@@ -76,7 +89,7 @@ export async function refreshPrivateView(force: boolean): Promise<void> {
       paintMessage(timeline, response.reason === "no-account" ? "Open X to load engagements" : "Failed to load");
       paintMessage(accounts, response.reason === "no-account" ? "No accounts yet" : "Couldn't load accounts or balances");
       if (saved.length) paintAccounts(saved, null);
-      paintBalance();
+      paintAllAccounts();
       return;
     }
     const data = response.data as Partial<Snapshot>;
@@ -87,7 +100,7 @@ export async function refreshPrivateView(force: boolean): Promise<void> {
     snapshot = { accounts: accountsList, events: history?.events ?? null, nextCursor: history?.nextCursor ?? null, balances };
     cursor = history?.nextCursor ?? null;
     selected = null;
-    paintBalance();
+    paintAllAccounts();
     paintAccounts(accountsList, balances);
     paintHistory(history?.events ?? null);
   } catch {
@@ -96,7 +109,7 @@ export async function refreshPrivateView(force: boolean): Promise<void> {
     cursor = null;
     paintMessage(timeline, "Failed to load");
     paintMessage(accounts, "Couldn't load accounts or balances");
-    paintBalance();
+    paintAllAccounts();
   } finally {
     if (id === refreshId && refresh instanceof HTMLButtonElement) refresh.disabled = false;
   }
@@ -109,19 +122,25 @@ function paintMessage(root: Element, message: string): void {
   root.replaceChildren(empty);
 }
 
-function paintBalance(): void {
-  const balance = document.querySelector("#payout-balance");
-  const minimum = document.querySelector("#payout-minimum");
-  const button = document.querySelector("#payout-button");
-  if (balance) balance.textContent = snapshot?.balances ? availableUsd(snapshot.balances.combined.availableLamports, snapshot.balances.claimEligibility.solUsd) : "– USD";
-  const selection = homeSelection();
-  if (minimum instanceof HTMLElement) {
-    minimum.hidden = Boolean(selection);
-    minimum.textContent = snapshot?.balances ? eligibilityText(snapshot.balances) : "Balances unavailable";
-  }
-  if (button instanceof HTMLButtonElement) {
-    button.hidden = !selection;
-  }
+const MINIMUM_HINT = "Minimum > $5";
+
+function setMinimumHint(button: HTMLButtonElement, show: boolean): void {
+  const wrap = button.parentElement;
+  if (!(wrap instanceof HTMLElement)) return;
+  if (show) wrap.dataset.hint = MINIMUM_HINT;
+  else delete wrap.dataset.hint;
+}
+
+function isAccountMinimumBlock(amount: { paused: boolean; availableLamports: string } | undefined, balances: Balances | null): boolean {
+  if (amount?.paused || !amount || !balances?.claimEligibility.solUsd) return false;
+  const reason = balances.claimEligibility.reason;
+  return reason !== "quote_unavailable" && reason !== "quote_stale";
+}
+
+function isCombinedMinimumBlock(balances: Balances | null): boolean {
+  if (!balances?.claimEligibility.solUsd || balances.accounts.some((account) => account.paused)) return false;
+  const reason = balances.claimEligibility.reason;
+  return reason !== "quote_unavailable" && reason !== "quote_stale";
 }
 
 function availableUsd(lamports: string, quote: string | null): string {
@@ -129,16 +148,46 @@ function availableUsd(lamports: string, quote: string | null): string {
   return usd ? `${usd} available` : "USD unavailable";
 }
 
+function accountClaimLabel(amount: { paused: boolean; availableLamports: string } | undefined, balances: Balances | null): string {
+  if (amount?.paused) return "Claims paused";
+  if (!amount) return "Balance unavailable";
+  if (balances?.claimEligibility.reason === "quote_unavailable") return "SOL price unavailable";
+  if (balances?.claimEligibility.reason === "quote_stale") return "Updating SOL price";
+  if (balances?.claimEligibility.solUsd) return "Claim";
+  return balances ? eligibilityText(balances) : "Balance unavailable";
+}
+
 function eligibilityText(balances: Balances): string {
   if (balances.claimEligibility.reason === "disputed") return "Claims paused by dispute";
   if (balances.claimEligibility.reason === "unauthorized") return "Claim unauthorized";
   if (balances.claimEligibility.available) return "Eligible to claim";
   switch (balances.claimEligibility.reason) {
-    case "below_minimum": return "Minimum to claim: $5";
+    case "below_minimum": return "Claim";
     case "quote_unavailable": return "SOL price unavailable; try later";
     case "quote_stale": return "Updating SOL price; try soon";
     default: return "Claim unavailable";
   }
+}
+
+function paintAllAccounts(): void {
+  const balance = document.querySelector("#accounts-total");
+  const button = document.querySelector("#claim-all");
+  const balances = snapshot?.balances ?? null;
+  if (balance) balance.textContent = balances ? availableUsd(balances.combined.availableLamports, balances.claimEligibility.solUsd) : "– USD";
+  if (!(button instanceof HTMLButtonElement)) return;
+  const canClaim = Boolean(allAccountsSelection() && balances && aboveMinimum(balances.combined.availableLamports, balances.claimEligibility.solUsd));
+  button.disabled = !canClaim;
+  button.textContent = canClaim || isCombinedMinimumBlock(balances) ? "Claim all" : combinedClaimLabel(balances);
+  setMinimumHint(button, !canClaim && isCombinedMinimumBlock(balances));
+}
+
+function combinedClaimLabel(balances: Balances | null): string {
+  if (!balances) return "Balances unavailable";
+  if (balances.accounts.some((account) => account.paused)) return "Claims paused";
+  if (balances.claimEligibility.reason === "quote_unavailable") return "SOL price unavailable";
+  if (balances.claimEligibility.reason === "quote_stale") return "Updating SOL price";
+  if (balances.claimEligibility.solUsd) return "Claim all";
+  return eligibilityText(balances);
 }
 
 function paintAccounts(accounts: TrackedAccount[], balances: Balances | null): void {
@@ -151,8 +200,11 @@ function paintAccounts(accounts: TrackedAccount[], balances: Balances | null): v
     article.className = "account-row";
     const main = document.createElement("div");
     main.className = "account-main";
-    const name = document.createElement("p");
-    name.className = "label";
+    const name = document.createElement("a");
+    name.className = "label account-profile";
+    name.href = new URL(`/creators/id/${account.xUserId}`, WEBSITE_URL).href;
+    name.target = "_blank";
+    name.rel = "noreferrer";
     name.textContent = `@${account.username}`;
     const balance = document.createElement("p");
     balance.className = "account-balance";
@@ -161,26 +213,19 @@ function paintAccounts(accounts: TrackedAccount[], balances: Balances | null): v
     const actions = document.createElement("div");
     actions.className = "account-actions";
     const claimButton = document.createElement("button");
-    claimButton.className = "payout-button";
+    claimButton.className = "payout-button account-claim";
     claimButton.type = "button";
     claimButton.dataset.action = "claim";
     claimButton.dataset.xUserId = account.xUserId;
-    claimButton.textContent = "Claim";
-    if (rowSelection(account.xUserId)) actions.append(claimButton);
-    else {
-      const reason = document.createElement("p");
-      reason.className = "payout-minimum";
-      reason.textContent = amount?.paused ? "Claims paused" : !amount ? "Balance unavailable" : balances?.claimEligibility.reason === "quote_unavailable" ? "SOL price unavailable" : balances?.claimEligibility.reason === "quote_stale" ? "Updating SOL price" : balances?.claimEligibility.solUsd ? "Minimum to claim: $5" : balances ? eligibilityText(balances) : "Balance unavailable";
-      actions.append(reason);
-    }
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.className = "remove-account";
-    remove.dataset.action = "remove";
-    remove.dataset.xUserId = account.xUserId;
-    remove.setAttribute("aria-label", `Remove @${account.username}`);
-    remove.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>';
-    actions.append(remove);
+    const canClaim = Boolean(amount && rowSelection(account.xUserId) && aboveMinimum(amount.availableLamports, balances?.claimEligibility.solUsd ?? null));
+    claimButton.disabled = !canClaim;
+    const minimumBlocked = !canClaim && isAccountMinimumBlock(amount, balances);
+    claimButton.textContent = canClaim || minimumBlocked ? "Claim" : accountClaimLabel(amount, balances);
+    const wrap = document.createElement("span");
+    wrap.className = "claim-wrap";
+    wrap.append(claimButton);
+    setMinimumHint(claimButton, minimumBlocked);
+    actions.append(wrap);
     article.append(main, actions);
     root.append(article);
   }
@@ -200,7 +245,8 @@ function paintHistory(events: EventRow[] | null): void {
   for (const event of events) {
     const article = document.createElement("article");
     article.className = "post";
-    if (event.text) { const text = document.createElement("p"); text.className = "text"; text.textContent = event.text; article.append(text); }
+    const visibleText = event.text ? stripTrailingMediaLinks(event.text, event.media.length) : null;
+    if (visibleText) { const text = document.createElement("p"); text.className = "text"; text.textContent = visibleText; article.append(text); }
     if (event.media.length) {
       const media = document.createElement("div");
       media.className = "media";
@@ -214,23 +260,11 @@ function paintHistory(events: EventRow[] | null): void {
     }
     const meta = document.createElement("div");
     meta.className = "meta";
-    const who = document.createElement("div");
-    who.className = "who";
-    if (event.avatarUrl) {
-      const avatar = document.createElement("img");
-      avatar.className = "avatar";
-      avatar.src = event.avatarUrl;
-      avatar.alt = "";
-      who.append(avatar);
-    }
-    const account = document.createElement("span");
-    account.className = "account";
-    account.textContent = `@${event.username}`;
     const time = document.createElement("time");
     time.dateTime = event.likedAt;
     const date = new Date(event.likedAt);
     time.textContent = Number.isNaN(date.getTime()) ? event.likedAt : new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date);
-    who.append(account, time);
+    meta.append(time);
     const links = document.createElement("div");
     links.className = "links";
     const link = document.createElement("a");
@@ -252,7 +286,7 @@ function paintHistory(events: EventRow[] | null): void {
         links.append(earning);
       }
     }
-    meta.append(who, links);
+    meta.append(links);
     const statusText = activityStatus(event.processingStatus);
     if (statusText) {
       const status = document.createElement("p");
@@ -261,6 +295,20 @@ function paintHistory(events: EventRow[] | null): void {
       meta.append(status);
     }
     article.append(meta);
+    if (event.avatarUrl && isLikedUsername(event.username)) {
+      const profile = document.createElement("a");
+      profile.className = "liker";
+      profile.href = `https://x.com/${event.username}`;
+      profile.target = "_blank";
+      profile.rel = "noreferrer";
+      profile.title = `@${event.username}`;
+      const avatar = document.createElement("img");
+      avatar.className = "avatar";
+      avatar.src = event.avatarUrl;
+      avatar.alt = "";
+      profile.append(avatar);
+      article.append(profile);
+    }
     root.append(article);
   }
   if (cursor) {

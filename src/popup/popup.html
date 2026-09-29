@@ -7,45 +7,56 @@
     <link rel="stylesheet" href="popup.css" />
   </head>
   <body class="is-locked">
-    <section id="disclaimer" class="disclaimer">
-      <img class="mark" src="icons/icon32.png" alt="" width="32" height="32" />
-      <h1>Data this extension collects</h1>
-      <p>Nothing is collected until you agree. ScrollX does not watch X, save your account, or send a like before that.</p>
-      <p>After you agree, liking, reposting, or commenting on a post on X sends that post:</p>
-      <ul>
-        <li>Your X username, profile picture, and numeric account ID (required to send an observation)</li>
-        <li>The post text, images, videos, and link</li>
-        <li>The time you liked, reposted, or commented</li>
-      </ul>
-      <p>
-        A reply to a comment under a post still sends the post, not the comment. Unlikes and removing a repost are not collected.
-        Your signed-in X account is saved on this device. An exportable Ed25519 signing key is stored locally in the extension; its public key and signed requests identify this installation to the backend. Back up the private key to restore the same history on another installation. This key is not a payout wallet. A wallet address
-        is sent only if you later claim a payout. You can turn capture off in settings.
-      </p>
-      <label class="disclaimer-agree">
-        <input id="disclaimer-agree" type="checkbox" />
-        <span>I understand and agree to the <a id="docs-link" href="https://www.scrollx.app/docs" target="_blank" rel="noreferrer">rules</a></span>
-      </label>
-      <button id="disclaimer-continue" type="button" disabled>Continue</button>
-    </section>
     <header class="header">
       <img class="mark" src="icons/icon32.png" alt="ScrollX" width="32" height="32" />
-      <nav class="header-links">
-        <a id="x-link" href="https://x.com/your_handle" target="_blank" rel="noreferrer">X</a>
-        <a id="site-link" href="https://example.com" target="_blank" rel="noreferrer">Website</a>
+      <nav class="header-links" aria-label="Links">
+        <a id="x-link" href="https://x.com/your_handle" target="_blank" rel="noreferrer" aria-label="X">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+            <path fill="currentColor" d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.744l7.727-8.835L1.254 2.25H8.08l4.253 5.622L18.244 2.25zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+          </svg>
+        </a>
+        <a id="site-link" href="https://example.com" target="_blank" rel="noreferrer" aria-label="Website">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+            <path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z" />
+          </svg>
+        </a>
       </nav>
     </header>
-    <div id="home" class="home">
-    <section class="payout" aria-label="Payout">
-      <p id="payout-balance" class="payout-balance">– USD</p>
-      <button id="payout-button" class="payout-button" type="button" hidden>Claim</button>
-      <p id="payout-minimum" class="payout-minimum">Loading balances…</p>
+    <section id="disclaimer" class="disclaimer">
+      <div class="disclaimer-body">
+        <h1>Data this extension collects</h1>
+        <p>Nothing is collected until you agree. ScrollX does not watch X, save your account, or send a like before that.</p>
+        <p>After you agree, liking, reposting, or commenting on a post on X sends that post:</p>
+        <ul>
+          <li>Your X username, profile picture, and numeric account ID (required to send an observation)</li>
+          <li>The post text, images, videos, and link</li>
+          <li>The time you liked, reposted, or commented</li>
+        </ul>
+        <p>
+          A reply to a comment under a post still sends the post, not the comment. Unlikes and removing a repost are not collected.
+          Your signed-in X account is saved on this device. An exportable Ed25519 signing key is stored locally in the extension; its public key and signed requests identify this installation to the backend. Back up the private key to restore the same history on another installation. This key is not a payout wallet. A wallet address
+          is sent only if you later claim a payout. You can turn capture off in settings.
+        </p>
+      </div>
+      <div class="disclaimer-nav">
+        <label class="disclaimer-agree">
+          <input id="disclaimer-agree" type="checkbox" />
+          <span>I understand and agree to the <a id="docs-link" href="https://www.scrollx.app/docs" target="_blank" rel="noreferrer">rules</a></span>
+        </label>
+        <button id="disclaimer-continue" type="button" disabled>Continue</button>
+      </div>
     </section>
-    <p id="claim-eligibility" class="hint" role="status"></p>
+    <div id="home" class="home" hidden>
     <main id="timeline" class="timeline"></main>
     </div>
-    <section id="accounts" class="accounts" hidden>
-      <h1 class="accounts-title">My accounts</h1>
+    <section id="accounts" class="accounts">
+      <section class="accounts-total" aria-label="All accounts">
+        <p id="accounts-total" class="accounts-total-balance">– USD</p>
+        <span class="claim-wrap">
+          <button id="claim-all" class="payout-button" type="button" data-action="claim-all" disabled>Loading balances…</button>
+        </span>
+      </section>
+      <p id="claim-eligibility" class="hint" role="status"></p>
       <div id="accounts-list" class="accounts-list"></div>
     </section>
     <section id="activity" class="activity" aria-labelledby="activity-title" hidden>
@@ -160,12 +171,9 @@
             <path fill="currentColor" d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z" />
           </svg>
         </button>
-        <button id="nav-accounts" class="icon-button" type="button" aria-label="Accounts">
+        <button id="nav-feed" class="icon-button" type="button" aria-label="Feed">
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-            <path
-              fill="currentColor"
-              d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"
-            />
+            <path fill="currentColor" d="M4 6h16v2H4zm0 5h16v2H4zm0 5h10v2H4z" />
           </svg>
         </button>
         <button id="nav-activity" class="icon-button" type="button" aria-label="Claim activity">
@@ -181,6 +189,14 @@
               fill="currentColor"
               d="M17.65 6.35A7.96 7.96 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08a5.99 5.99 0 0 1-5.65 4c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z"
             />
+          </svg>
+        </button>
+        <button id="dock" class="icon-button" type="button" aria-label="Open beside the page" aria-pressed="false" hidden>
+          <svg class="dock-open" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+            <path fill="currentColor" d="M4 5a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1H4zm9 2h6v10h-6V7z" />
+          </svg>
+          <svg class="dock-back" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+            <path fill="currentColor" d="M6 6h7v2H8v7H6V6zm4 4h8v8h-8v-8z" />
           </svg>
         </button>
         <button id="settings" class="icon-button" type="button" aria-label="Settings" aria-expanded="false" aria-controls="settings-panel">

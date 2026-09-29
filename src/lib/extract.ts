@@ -337,15 +337,65 @@ function readTweet(node: Record<string, unknown>): CachedTweet | null {
   const replyId = legacy.in_reply_to_status_id_str;
   const fullText = typeof legacy.full_text === "string" ? legacy.full_text : null;
   const conversationId = legacy.conversation_id_str;
+  const note = readNoteText(node);
+  const urls = mediaShortUrls(legacy, node);
 
   return {
     postId: node.rest_id,
-    text: readNoteText(node) ?? fullText,
+    text: cleanTweetText(note ?? fullText, note ? null : legacy.display_text_range, urls),
     media: readMedia(legacy),
     isReply: typeof replyId === "string" && replyId.length > 0,
     conversationId: typeof conversationId === "string" && conversationId.length > 0 ? conversationId : null,
     inReplyToStatusId: typeof replyId === "string" && replyId.length > 0 ? replyId : null,
   };
+}
+
+export function stripTrailingMediaLinks(text: string, mediaCount: number): string | null {
+  let next = text.trimEnd();
+  let removed = 0;
+  while (removed < mediaCount) {
+    const match = /(?:^|\s)https:\/\/t\.co\/[A-Za-z0-9]+$/.exec(next);
+    if (!match) break;
+    next = next.slice(0, match.index).trimEnd();
+    removed += 1;
+  }
+  const trimmed = next.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function cleanTweetText(text: string | null, range: unknown, urls: string[]): string | null {
+  if (text === null) return null;
+  const visible = applyDisplayRange(text, range);
+  let next = visible;
+  for (const url of urls) next = next.split(url).join("");
+  const trimmed = next.replace(/[ \t]{2,}/g, " ").replace(/[ \t]+\n/g, "\n").trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function applyDisplayRange(text: string, range: unknown): string {
+  if (!Array.isArray(range) || range.length < 2) return text;
+  const start = range[0];
+  const end = range[1];
+  if (typeof start !== "number" || typeof end !== "number" || !Number.isInteger(start) || !Number.isInteger(end)) return text;
+  if (start < 0 || end < start || end > text.length) return text;
+  return text.slice(start, end);
+}
+
+function mediaShortUrls(legacy: Record<string, unknown>, node: Record<string, unknown>): string[] {
+  const urls = new Set<string>();
+  const add = (list: unknown[] | null) => {
+    for (const entry of list ?? []) {
+      const media = asRecord(entry);
+      if (media && typeof media.url === "string" && media.url.length > 0) urls.add(media.url);
+    }
+  };
+  add(asArray(asRecord(legacy.extended_entities)?.media));
+  add(asArray(asRecord(legacy.entities)?.media));
+  const note = asRecord(node.note_tweet);
+  const noteResults = asRecord(note?.note_tweet_results);
+  const result = asRecord(noteResults?.result) ?? asRecord(note?.result);
+  add(asArray(asRecord(result?.entity_set)?.media));
+  return [...urls];
 }
 
 function readNoteText(node: Record<string, unknown>): string | null {

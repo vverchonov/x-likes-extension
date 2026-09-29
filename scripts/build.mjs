@@ -43,7 +43,10 @@ const manifest = {
   background: {
     service_worker: "background.js",
   },
-  permissions: ["storage"],
+  permissions: ["storage", "sidePanel"],
+  side_panel: {
+    default_path: "sidepanel.html",
+  },
   host_permissions: hostPermissions(beOrigin),
   content_scripts: [
     {
@@ -78,7 +81,9 @@ for (const browser of ["chrome", "brave"]) {
     });
   }
 
-  cpSync(resolve(root, "src/popup/popup.html"), resolve(outdir, "popup.html"));
+  const popupHtml = readFileSync(resolve(root, "src/popup/popup.html"), "utf8");
+  writeFileSync(resolve(outdir, "popup.html"), popupHtml);
+  writeFileSync(resolve(outdir, "sidepanel.html"), popupHtml.replace("<html lang=\"en\">", "<html lang=\"en\" class=\"is-docked\">"));
   cpSync(resolve(root, "src/popup/popup.css"), resolve(outdir, "popup.css"));
   for (const size of [16, 32, 48, 128]) {
     cpSync(resolve(root, "icons", `icon${size}.png`), resolve(outdir, "icons", `icon${size}.png`));

@@ -7,6 +7,7 @@ import {
   isFavoriteTweetRequest,
   isUnfavoriteTweetRequest,
   originalPostForEngagement,
+  stripTrailingMediaLinks,
   parseFavoriteTweetId,
   payloadFromCached,
   preferOriginalImage,
@@ -55,6 +56,15 @@ const reply = {
   },
 };
 
+describe("stripTrailingMediaLinks", () => {
+  it("removes one trailing media link per attachment", () => {
+    assert.equal(stripTrailingMediaLinks("A photo https://t.co/sNEPlE8KDM", 1), "A photo");
+    assert.equal(stripTrailingMediaLinks("Read https://t.co/realLink https://t.co/sNEPlE8KDM", 1), "Read https://t.co/realLink");
+    assert.equal(stripTrailingMediaLinks("https://t.co/sNEPlE8KDM", 1), null);
+    assert.equal(stripTrailingMediaLinks("Read https://t.co/realLink", 0), "Read https://t.co/realLink");
+  });
+});
+
 describe("collectTweets", () => {
   it("keeps original posts and marks replies", () => {
     const tweets = collectTweets({
@@ -99,6 +109,69 @@ describe("collectTweets", () => {
       { type: "image", url: "https://pbs.twimg.com/media/abc.jpg?name=orig" },
       { type: "video", url: "https://video.twimg.com/ext_tw_video/high.mp4" },
     ]);
+  });
+
+  it("omits media t.co links that are not part of the post text", () => {
+    const [tweet] = collectTweets({
+      rest_id: "400",
+      legacy: {
+        full_text: "A photo https://t.co/sNEPlE8KDM",
+        display_text_range: [0, 7],
+        entities: { media: [{ url: "https://t.co/sNEPlE8KDM", type: "photo" }] },
+        extended_entities: {
+          media: [{ type: "photo", url: "https://t.co/sNEPlE8KDM", media_url_https: "https://pbs.twimg.com/media/abc.jpg" }],
+        },
+      },
+    });
+
+    assert.ok(tweet);
+    assert.equal(tweet.text, "A photo");
+    assert.deepEqual(tweet.media, [{ type: "image", url: "https://pbs.twimg.com/media/abc.jpg" }]);
+  });
+
+  it("keeps a real t.co link and drops only the media link", () => {
+    const [tweet] = collectTweets({
+      rest_id: "401",
+      legacy: {
+        full_text: "Read https://t.co/realLink https://t.co/sNEPlE8KDM",
+        extended_entities: {
+          media: [{ type: "photo", url: "https://t.co/sNEPlE8KDM", media_url_https: "https://pbs.twimg.com/media/abc.jpg" }],
+        },
+      },
+    });
+
+    assert.equal(tweet?.text, "Read https://t.co/realLink");
+  });
+
+  it("drops a post whose text is only the media link", () => {
+    const [tweet] = collectTweets({
+      rest_id: "402",
+      legacy: {
+        full_text: "https://t.co/sNEPlE8KDM",
+        extended_entities: {
+          media: [{ type: "photo", url: "https://t.co/sNEPlE8KDM", media_url_https: "https://pbs.twimg.com/media/abc.jpg" }],
+        },
+      },
+    });
+
+    assert.equal(tweet?.text, null);
+  });
+
+  it("strips a media link from long note text", () => {
+    const [tweet] = collectTweets({
+      rest_id: "403",
+      legacy: { full_text: "short" },
+      note_tweet: {
+        note_tweet_results: {
+          result: {
+            text: "A much longer post https://t.co/sNEPlE8KDM",
+            entity_set: { media: [{ url: "https://t.co/sNEPlE8KDM" }] },
+          },
+        },
+      },
+    });
+
+    assert.equal(tweet?.text, "A much longer post");
   });
 
   it("drops blob and non-https media urls", () => {
