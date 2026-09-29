@@ -1,10 +1,14 @@
-import { type Balances, type Claim, type EventRow, type TrackedAccount, formatSol, formatUsd, parseBalances, parseClaim, parseEvents, trackedAccounts } from "../lib/private-data.ts";
+import { type Balances, type Claim, type ClaimHistory, type EventRow, type TrackedAccount, formatSol, formatUsd, parseBalances, parseClaim, parseClaimHistory, parseEvents, trackedAccounts } from "../lib/private-data.ts";
 
 type Selection = { xUserIds: string[]; balance: string };
 type Snapshot = { accounts: TrackedAccount[]; events: EventRow[] | null; nextCursor: string | null; balances: Balances | null };
 
 let snapshot: Snapshot | null = null;
 let claim: Claim | null = null;
+let claims: ClaimHistory[] = [];
+let claimCursor: string | null = null;
+let claimRefreshId = 0;
+let claimLoading = false;
 let refreshId = 0;
 let cursor: string | null = null;
 let selected: Selection | null = null;
@@ -27,12 +31,26 @@ function meetsMinimum(lamports: string, price: string | null): boolean {
 }
 export function selectClaim(selection: Selection): void { selected = selection; }
 export function lastClaim(): Claim | null { return claim; }
-export function setClaim(next: Claim): void { claim = next; paintClaim(); }
+export function setClaim(next: Claim): void { claim = next; paintClaims(); }
+export function clearClaimHistory(): void {
+  claimRefreshId++;
+  claim = null;
+  claims = [];
+  claimCursor = null;
+  claimLoading = false;
+  paintClaims();
+  paintClaimMore();
+  claimMessage("");
+}
 
 export function mountPrivateView(): void {
-  document.querySelector("#refresh")?.addEventListener("click", () => { void refreshPrivateView(true); });
+  document.querySelector("#refresh")?.addEventListener("click", () => {
+    void refreshPrivateView(true);
+    void refreshClaimHistory().then(() => refreshClaimStatus());
+  });
+  document.querySelector("#activity-more")?.addEventListener("click", () => { void loadMoreClaims(); });
   void refreshPrivateView(true);
-  void refreshClaimStatus();
+  void refreshClaimHistory().then(() => refreshClaimStatus());
   window.setInterval(() => { if (claim && (claim.status === "pending" || claim.status === "held")) void refreshClaimStatus(); }, 15_000);
 }
 
@@ -49,10 +67,9 @@ export async function refreshPrivateView(force: boolean): Promise<void> {
     const result: unknown = await chrome.runtime.sendMessage({ type: "load-private-data", force });
     if (id !== refreshId) return;
     if (!result || typeof result !== "object") throw new Error("Invalid response");
-    const response = result as { ok?: unknown; reason?: unknown; data?: unknown; accounts?: unknown; claim?: unknown };
+    const response = result as { ok?: unknown; reason?: unknown; data?: unknown; accounts?: unknown };
     if (response.ok !== true) {
       snapshot = null;
-      claim = null;
       cursor = null;
       selected = null;
       const saved = trackedAccounts(response.accounts);
@@ -60,7 +77,6 @@ export async function refreshPrivateView(force: boolean): Promise<void> {
       paintMessage(accounts, response.reason === "no-account" ? "No accounts yet" : "Couldn't load accounts or balances");
       if (saved.length) paintAccounts(saved, null);
       paintBalance();
-      paintClaim();
       return;
     }
     const data = response.data as Partial<Snapshot>;
@@ -70,21 +86,17 @@ export async function refreshPrivateView(force: boolean): Promise<void> {
     const balances = data.balances === null ? null : parseBalances(data.balances);
     snapshot = { accounts: accountsList, events: history?.events ?? null, nextCursor: history?.nextCursor ?? null, balances };
     cursor = history?.nextCursor ?? null;
-    claim = response.claim ? parseClaim(response.claim) : null;
     selected = null;
     paintBalance();
     paintAccounts(accountsList, balances);
     paintHistory(history?.events ?? null);
-    paintClaim();
   } catch {
     if (id !== refreshId) return;
     snapshot = null;
-    claim = null;
     cursor = null;
     paintMessage(timeline, "Failed to load");
     paintMessage(accounts, "Couldn't load accounts or balances");
     paintBalance();
-    paintClaim();
   } finally {
     if (id === refreshId && refresh instanceof HTMLButtonElement) refresh.disabled = false;
   }
@@ -295,18 +307,155 @@ async function loadMore(button: HTMLButtonElement): Promise<void> {
   } catch { if (refreshId === requestedRefresh) { button.disabled = false; button.textContent = "Retry load more"; } }
 }
 
-function paintClaim(refreshFailed = false): void {
-  const status = document.querySelector("#latest-claim");
-  if (status) status.textContent = claim ? `Claim ${claim.status}: ${formatSol(claim.amountLamports)} to ${claim.destination}${claim.transactionSignature && claim.status === "confirmed" ? ` · signature ${claim.transactionSignature}` : ""}${refreshFailed ? " (last known). Couldn't refresh claim status." : ""}` : "";
+function claimMessage(message: string): void {
+  const error = document.querySelector("#activity-refresh-error");
+  if (!(error instanceof HTMLElement)) return;
+  error.textContent = message;
+  error.hidden = !message;
+}
+
+export async function refreshClaimHistory(): Promise<void> {
+  const id = ++claimRefreshId;
+  claimLoading = true;
+  claimMessage("");
+  paintClaimMore();
+  if (!claims.length) {
+    const root = document.querySelector("#activity-list");
+    if (root instanceof HTMLElement && !claim) paintMessage(root, "Loading claims…");
+  }
+  try {
+    const response: unknown = await chrome.runtime.sendMessage({ type: "claim-history" });
+    if (!response || typeof response !== "object" || (response as { ok?: unknown }).ok !== true) throw new Error("Claim activity unavailable");
+    const page = parseClaimHistory(response);
+    if (id !== claimRefreshId) return;
+    claims = page.claims;
+    claim = claims.find((item) => item.status === "pending" || item.status === "held") ?? claims[0] ?? null;
+    claimCursor = page.nextCursor;
+    paintClaims();
+  } catch {
+    if (id === claimRefreshId) {
+      if (claim || claims.length) paintClaims();
+      else {
+        const root = document.querySelector("#activity-list");
+        if (root instanceof HTMLElement) paintMessage(root, "Failed to load");
+      }
+      claimMessage(claim || claims.length ? "Couldn't load claim activity. Showing the last known data." : "");
+    }
+  } finally {
+    if (id === claimRefreshId) { claimLoading = false; paintClaimMore(); }
+  }
+}
+
+async function loadMoreClaims(): Promise<void> {
+  const cursor = claimCursor;
+  if (!cursor || claimLoading) return;
+  const id = claimRefreshId;
+  claimLoading = true;
+  claimMessage("");
+  paintClaimMore();
+  try {
+    const response: unknown = await chrome.runtime.sendMessage({ type: "claim-history", cursor });
+    if (!response || typeof response !== "object" || (response as { ok?: unknown }).ok !== true) throw new Error("Claim activity unavailable");
+    const page = parseClaimHistory(response);
+    if (id !== claimRefreshId) return;
+    for (const item of page.claims) {
+      const index = claims.findIndex((existing) => existing.id === item.id);
+      if (index === -1) claims.push(item);
+      else if (claims[index]!.status === item.status) claims[index] = item;
+    }
+    claimCursor = page.nextCursor;
+    paintClaims();
+  } catch {
+    if (id === claimRefreshId) claimMessage("Couldn't load older claims. Try again.");
+  } finally {
+    if (id === claimRefreshId) { claimLoading = false; paintClaimMore(); }
+  }
+}
+
+function paintClaimMore(): void {
+  const more = document.querySelector("#activity-more");
+  if (!(more instanceof HTMLButtonElement)) return;
+  more.hidden = !claimCursor;
+  more.disabled = claimLoading;
+  more.textContent = claimLoading ? "Loading…" : "Load more";
+}
+
+function paintClaims(): void {
+  const root = document.querySelector("#activity-list");
+  if (!(root instanceof HTMLElement)) return;
+  root.replaceChildren();
+  const current = claim;
+  const recent = current && !claims.some((item) => item.id === current.id) ? current : null;
+  const shown: (Claim | ClaimHistory)[] = recent ? [recent, ...claims] : claims;
+  if (!shown.length) { paintMessage(root, "No claims yet"); return; }
+  const details: Record<Claim["status"], string> = {
+    pending: "Your claim is being processed. Payment is not confirmed yet.",
+    held: "Your claim is on hold. Payment is not confirmed yet.",
+    confirmed: "Your claim has been paid to this wallet.",
+    failed: "This claim failed. No payment was confirmed.",
+    canceled: "This claim was canceled. No payment was confirmed.",
+  };
+  for (const item of shown) {
+    const card = document.createElement("article");
+    card.className = "activity-card";
+    const date = document.createElement("time");
+    if ("createdAt" in item && typeof item.createdAt === "string") {
+      date.dateTime = item.createdAt;
+      date.textContent = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(item.createdAt));
+    } else date.textContent = "Latest claim";
+    const summary = document.createElement("div");
+    summary.className = "activity-summary";
+    const status = document.createElement("span");
+    status.className = "activity-badge";
+    status.dataset.status = item.status;
+    status.textContent = item.status[0]!.toUpperCase() + item.status.slice(1);
+    const amount = document.createElement("strong");
+    amount.className = "activity-amount";
+    amount.textContent = formatSol(item.amountLamports);
+    summary.append(status, amount);
+    const description = document.createElement("p");
+    description.className = "activity-description";
+    description.textContent = details[item.status];
+    const destination = document.createElement("div");
+    destination.className = "activity-destination";
+    const label = document.createElement("span");
+    label.className = "activity-label";
+    label.textContent = "Destination wallet";
+    const address = document.createElement("code");
+    address.textContent = item.destination;
+    destination.append(label, address);
+    card.append(date, summary, description, destination);
+    if (item.transactionSignature) {
+      const transaction = destination.cloneNode(true) as HTMLElement;
+      transaction.querySelector(".activity-label")!.textContent = "Transaction signature";
+      transaction.querySelector("code")!.textContent = item.transactionSignature;
+      card.append(transaction);
+    }
+    root.append(card);
+  }
 }
 
 export async function refreshClaimStatus(): Promise<void> {
+  const active = claims.find((item) => item.status === "pending" || item.status === "held") ?? (claim && (claim.status === "pending" || claim.status === "held") ? claim : null);
+  if (!active) return;
+  const id = active.id;
   try {
-    const response: unknown = await chrome.runtime.sendMessage({ type: "claim-status" });
+    const response: unknown = await chrome.runtime.sendMessage({ type: "claim-status", id });
     if (!response || typeof response !== "object" || (response as { ok?: unknown }).ok !== true) throw new Error("Claim status unavailable");
     const next = (response as { claim?: unknown }).claim;
-    if (next) { claim = parseClaim(next); paintClaim(); }
+    if (!next) return;
+    const updated = parseClaim(next);
+    if (updated.id !== id) return;
+    const changed = active.status !== updated.status;
+    if (claim?.id === id) claim = updated;
+    const index = claims.findIndex((item) => item.id === id);
+    if (index !== -1) claims[index] = { ...claims[index]!, ...updated };
+    paintClaims();
+    if (changed) void refreshPrivateView(true);
+    const error = document.querySelector("#activity-refresh-error");
+    if (error?.textContent === "Couldn't refresh claim status. Showing the last known status.") claimMessage("");
   } catch {
-    if (claim) paintClaim(true);
+    const error = document.querySelector("#activity-refresh-error");
+    if (error instanceof HTMLElement && error.hidden) claimMessage("Couldn't refresh claim status. Showing the last known status.");
   }
 }

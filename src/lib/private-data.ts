@@ -10,6 +10,7 @@ export type Balance = { xUserId: string; availableLamports: string; pendingLampo
 export type EligibilityReason = "below_minimum" | "quote_unavailable" | "quote_stale" | "disputed" | "unauthorized";
 export type Balances = { accounts: Balance[]; combined: Omit<Balance, "xUserId" | "paused">; claimEligibility: { available: boolean; reason: EligibilityReason | null; solUsd: string | null; quoteAt: string | null } };
 export type Claim = { id: string; status: "pending" | "held" | "confirmed" | "failed" | "canceled"; amountLamports: string; destination: string; transactionSignature: string | null };
+export type ClaimHistory = Claim & { createdAt: string };
 
 export function isXUserId(value: unknown): value is string {
   return typeof value === "string" && /^[1-9][0-9]{0,19}$/.test(value);
@@ -67,6 +68,18 @@ export function parseClaim(value: unknown): Claim {
   const claim = value as Partial<Claim>;
   if (typeof claim.id !== "string" || !["pending", "held", "confirmed", "failed", "canceled"].includes(claim.status ?? "") || !lamports(claim.amountLamports) || typeof claim.destination !== "string" || !isSolanaAddress(claim.destination) || !(claim.transactionSignature === null || typeof claim.transactionSignature === "string")) throw new Error("Invalid claim");
   return claim as Claim;
+}
+
+export function parseClaimHistory(value: unknown): { claims: ClaimHistory[]; nextCursor: string | null } {
+  if (!value || typeof value !== "object") throw new Error("Invalid claim history");
+  const { claims, nextCursor } = value as { claims?: unknown; nextCursor?: unknown };
+  if (!Array.isArray(claims) || !(nextCursor === null || typeof nextCursor === "string" && nextCursor.length > 0)) throw new Error("Invalid claim history");
+  return { claims: claims.map((item) => {
+    const claim = parseClaim(item);
+    const createdAt = (item as { createdAt?: unknown }).createdAt;
+    if (typeof createdAt !== "string" || !createdAt || Number.isNaN(Date.parse(createdAt))) throw new Error("Invalid claim date");
+    return { ...claim, createdAt };
+  }), nextCursor };
 }
 
 export function formatSol(value: string): string {

@@ -4,7 +4,7 @@ import { httpsUrl } from "./lib/extract.ts";
 import { forgetSession, privateRequest } from "./lib/api.ts";
 import { applicationPublicKey, exportBackup, importBackup } from "./lib/identity.ts";
 import { isLikedUsername } from "./lib/accounts.ts";
-import { type Balances, type Claim, type EventRow, type TrackedAccount, isXUserId, parseBalances, parseClaim, parseEvents, trackedAccounts, validIds } from "./lib/private-data.ts";
+import { type Balances, type Claim, type ClaimHistory, type EventRow, type TrackedAccount, isXUserId, parseBalances, parseClaim, parseClaimHistory, parseEvents, trackedAccounts, validIds } from "./lib/private-data.ts";
 import { isSolanaAddress } from "./lib/solana.ts";
 import type { LikedPostPayload, MediaItem } from "./lib/types.ts";
 
@@ -85,7 +85,12 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
   }
 
   if (message && typeof message === "object" && (message as { type?: unknown }).type === "claim-status") {
-    void claimStatus().then((response) => sendResponse(response)).catch(() => sendResponse({ ok: false }));
+    void claimStatus((message as { id?: unknown }).id).then((response) => sendResponse(response)).catch(() => sendResponse({ ok: false }));
+    return true;
+  }
+
+  if (message && typeof message === "object" && (message as { type?: unknown }).type === "claim-history") {
+    void claimHistory((message as { cursor?: unknown }).cursor).then((response) => sendResponse(response)).catch(() => sendResponse({ ok: false }));
     return true;
   }
 
@@ -215,7 +220,7 @@ function query(ids: string[], cursor?: string): string {
   return params.toString();
 }
 
-async function loadData(force: boolean, xUserId?: string): Promise<{ ok: true; data: Snapshot; claim: Claim | null } | { ok: false; reason: "no-account" | "failed"; accounts: TrackedAccount[] }> {
+async function loadData(force: boolean, xUserId?: string): Promise<{ ok: true; data: Snapshot } | { ok: false; reason: "no-account" | "failed"; accounts: TrackedAccount[] }> {
   if (!(await isDisclaimerAccepted())) return { ok: false, reason: "failed", accounts: [] };
   const accounts = await readAccounts();
   if (!accounts.length) return { ok: false, reason: "no-account", accounts };
@@ -223,12 +228,12 @@ async function loadData(force: boolean, xUserId?: string): Promise<{ ok: true; d
   if (xUserId && !ids.includes(xUserId)) return { ok: false, reason: "failed", accounts };
   const historyIds = xUserId ? [xUserId] : ids;
   const publicKey = await applicationPublicKey();
-  const stored = await chrome.storage.local.get([CACHE_KEY, CLAIM_KEY]);
+  const stored = await chrome.storage.local.get(CACHE_KEY);
   const cached = stored[CACHE_KEY] as Snapshot | undefined;
   if (!force && cached && cached.publicKey === publicKey && Date.now() - cached.fetchedAt < CACHE_MS && JSON.stringify(ids) === JSON.stringify(idsFor(trackedAccounts(cached.accounts))) && JSON.stringify(historyIds) === JSON.stringify(cached.historyIds)) {
     try {
       if (publicKey !== await applicationPublicKey()) throw new Error("Identity changed during history read");
-      return { ok: true, data: { ...cached, accounts, ...(cached.events === null ? {} : parseEvents({ events: cached.events, nextCursor: cached.nextCursor })), balances: cached.balances === null ? null : parseBalances(cached.balances) }, claim: await readClaim() };
+      return { ok: true, data: { ...cached, accounts, ...(cached.events === null ? {} : parseEvents({ events: cached.events, nextCursor: cached.nextCursor })), balances: cached.balances === null ? null : parseBalances(cached.balances) } };
     } catch { /* Fetch fresh data. */ }
   }
   try {
@@ -240,7 +245,7 @@ async function loadData(force: boolean, xUserId?: string): Promise<{ ok: true; d
     if (publicKey !== await applicationPublicKey()) throw new Error("Identity changed during history read");
     const data = { publicKey, accounts, historyIds, events: history?.events ?? null, nextCursor: history?.nextCursor ?? null, balances, fetchedAt: Date.now() };
     if (history && balances) await chrome.storage.local.set({ [CACHE_KEY]: data });
-    return { ok: true, data, claim: await readClaim() };
+    return { ok: true, data };
   } catch (error) {
     console.error("Private data request failed", error);
     return { ok: false, reason: "failed", accounts };
@@ -267,18 +272,29 @@ async function readClaim(): Promise<Claim | null> {
   } catch { return null; }
 }
 
-async function claimStatus(): Promise<{ ok: true; claim: Claim | null } | { ok: false }> {
-  if (!(await isDisclaimerAccepted())) return { ok: false };
+async function claimStatus(id: unknown): Promise<{ ok: true; claim: Claim | null } | { ok: false }> {
+  if (!(await isDisclaimerAccepted()) || typeof id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) return { ok: false };
   const existing = await readClaim();
-  if (!existing) return { ok: true, claim: null };
   const publicKey = await applicationPublicKey();
-  const response = await privateRequest("GET", `/v1/rewards/claims/${encodeURIComponent(existing.id)}`);
+  const response = await privateRequest("GET", `/v1/rewards/claims/${encodeURIComponent(id)}`);
   if (!response.ok || publicKey !== await applicationPublicKey()) return { ok: false };
   const claim = parseClaim(await response.json());
-  if (claim.id !== existing.id || publicKey !== await applicationPublicKey()) return { ok: false };
-  await chrome.storage.local.set({ [CLAIM_KEY]: { publicKey, claim } });
-  if (claim.status !== existing.status) await chrome.storage.local.remove(CACHE_KEY);
+  if (claim.id !== id || publicKey !== await applicationPublicKey()) return { ok: false };
+  if (existing?.id === id) {
+    await chrome.storage.local.set({ [CLAIM_KEY]: { publicKey, claim } });
+    if (claim.status !== existing.status) await chrome.storage.local.remove(CACHE_KEY);
+  }
   return { ok: true, claim };
+}
+
+async function claimHistory(cursor: unknown): Promise<{ ok: true; claims: ClaimHistory[]; nextCursor: string | null } | { ok: false }> {
+  if (!(await isDisclaimerAccepted()) || !(cursor === undefined || typeof cursor === "string" && cursor.length > 0)) return { ok: false };
+  const publicKey = await applicationPublicKey();
+  const params = new URLSearchParams({ limit: "20" });
+  if (typeof cursor === "string") params.set("cursor", cursor);
+  const response = await privateRequest("GET", `/v1/rewards/claims?${params}`);
+  if (!response.ok || publicKey !== await applicationPublicKey()) return { ok: false };
+  return { ok: true, ...parseClaimHistory(await response.json()) };
 }
 
 async function postOnce(payload: SignedObservation): Promise<boolean> {

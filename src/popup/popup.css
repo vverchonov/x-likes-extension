@@ -31,6 +31,7 @@ body {
 body.is-locked .header,
 body.is-locked .home,
 body.is-locked .accounts,
+body.is-locked .activity,
 body.is-locked .settings,
 body.is-locked .processing,
 body.is-locked .claim,
@@ -198,17 +199,18 @@ body:not(.is-locked) .disclaimer {
   text-align: right;
 }
 
-#latest-claim {
+#claim-eligibility {
   padding: 4px 16px;
   overflow-wrap: anywhere;
 }
 
-#latest-claim:empty {
+#claim-eligibility:empty {
   display: none;
 }
 
 .home,
 .accounts,
+.activity,
 .settings,
 .claim,
 .processing {
@@ -220,6 +222,7 @@ body:not(.is-locked) .disclaimer {
 
 .home[hidden],
 .accounts[hidden],
+.activity[hidden],
 .settings[hidden],
 .claim[hidden],
 .processing[hidden],
@@ -241,6 +244,121 @@ body:not(.is-locked) .disclaimer {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+}
+
+.activity-body {
+  flex: 1;
+  min-height: 0;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.activity-body .empty {
+  padding: 32px 0;
+}
+
+.activity-body .empty[hidden],
+.activity-refresh-error[hidden],
+.activity-body button[hidden] {
+  display: none;
+}
+
+.activity-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.activity-card {
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: #101113;
+}
+
+.activity-card time {
+  display: block;
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.activity-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.activity-badge {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(29, 155, 240, 0.15);
+  color: var(--primary);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.activity-badge[data-status="confirmed"] {
+  background: rgba(0, 186, 124, 0.16);
+  color: #00ba7c;
+}
+
+.activity-badge[data-status="held"],
+.activity-badge[data-status="canceled"] {
+  background: rgba(255, 173, 31, 0.15);
+  color: #ffad1f;
+}
+
+.activity-badge[data-status="failed"] {
+  background: rgba(244, 33, 46, 0.15);
+  color: #f4212e;
+}
+
+.activity-amount {
+  font-size: 18px;
+  overflow-wrap: anywhere;
+}
+
+.activity-description {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.activity-destination {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.activity-label {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.activity-destination code {
+  display: block;
+  font-size: 13px;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.activity-body #activity-more {
+  margin-top: 16px;
+}
+
+.activity-refresh-error {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 18px;
 }
 
 .settings {
@@ -567,6 +685,44 @@ body:not(.is-locked) .disclaimer {
   color: var(--muted);
   font-size: 14px;
   line-height: 20px;
+  overflow-wrap: anywhere;
+}
+
+.confirm-wallet {
+  margin-top: 16px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #000000;
+}
+
+.confirm-wallet[hidden] {
+  display: none;
+}
+
+.confirm-wallet-label {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.confirm-wallet code {
+  display: block;
+  color: var(--foreground);
+  font-size: 13px;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.confirm-dialog .confirm-wallet p {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+  line-height: 18px;
 }
 
 .confirm-dialog .confirm-actions button:first-child {

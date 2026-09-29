@@ -2,7 +2,7 @@ import { X_PROFILE_URL, WEBSITE_URL } from "../config.ts";
 import { acceptDisclaimer, isDisclaimerAccepted } from "../lib/consent.ts";
 import { formatSol } from "../lib/private-data.ts";
 import { isSolanaAddress } from "../lib/solana.ts";
-import { currentSelection, homeSelection, mountPrivateView, refreshClaimStatus, refreshPrivateView, rowSelection, selectClaim, setClaim } from "./private-view.ts";
+import { clearClaimHistory, currentSelection, homeSelection, mountPrivateView, refreshClaimHistory, refreshClaimStatus, refreshPrivateView, rowSelection, selectClaim, setClaim } from "./private-view.ts";
 
 const toggle = document.querySelector("#capture-toggle");
 const settings = document.querySelector("#settings");
@@ -18,12 +18,14 @@ const identityPublicKey = document.querySelector("#identity-public-key");
 const payoutButton = document.querySelector("#payout-button");
 const home = document.querySelector("#home");
 const accounts = document.querySelector("#accounts");
+const activity = document.querySelector("#activity");
 const confirmRemove = document.querySelector("#confirm-remove");
 const confirmAccount = document.querySelector("#confirm-account");
 const confirmCancel = document.querySelector("#confirm-cancel");
 const confirmRemoveButton = document.querySelector("#confirm-remove-button");
 const navHome = document.querySelector("#nav-home");
 const navAccounts = document.querySelector("#nav-accounts");
+const navActivity = document.querySelector("#nav-activity");
 const footer = document.querySelector(".footer");
 const claim = document.querySelector("#claim");
 const claimBack = document.querySelector("#claim-back");
@@ -132,23 +134,27 @@ if (identityImport instanceof HTMLTextAreaElement && identityImportButton instan
       if (identityStatus instanceof HTMLElement) identityStatus.textContent = "Identity restored on this device";
       if (identityPublicKey instanceof HTMLElement) identityPublicKey.textContent = response.publicKey;
       hideRecoveryKey();
+      clearClaimHistory();
       await refreshPrivateView(true);
+      void refreshClaimHistory().then(() => refreshClaimStatus());
     })().catch(() => {
       if (identityStatus instanceof HTMLElement) identityStatus.textContent = "Import failed: check the recovery key";
     }).finally(() => { identityImport.value = ""; identityImportButton.disabled = true; });
   });
 }
 
-type Screen = "home" | "accounts" | "settings" | "claim" | "processing";
+type Screen = "home" | "accounts" | "activity" | "settings" | "claim" | "processing";
 
-let claimOrigin: Screen = "home";
+let claimOrigin: "home" | "accounts" = "home";
 
 if (
   payoutButton instanceof HTMLButtonElement &&
   home instanceof HTMLElement &&
   accounts instanceof HTMLElement &&
+  activity instanceof HTMLElement &&
   navHome instanceof HTMLButtonElement &&
   navAccounts instanceof HTMLButtonElement &&
+  navActivity instanceof HTMLButtonElement &&
   settings instanceof HTMLButtonElement &&
   settingsPanel instanceof HTMLElement &&
   footer instanceof HTMLElement &&
@@ -169,6 +175,11 @@ if (
   navAccounts.addEventListener("click", () => {
     closeRemoveConfirm();
     showScreen("accounts");
+  });
+  navActivity.addEventListener("click", () => {
+    closeRemoveConfirm();
+    showScreen("activity");
+    void refreshClaimHistory().then(() => refreshClaimStatus());
   });
   settings.addEventListener("click", () => {
     closeRemoveConfirm();
@@ -213,33 +224,31 @@ if (
   wallet.addEventListener("input", () => {
     const valid = isSolanaAddress(wallet.value);
     const showError = wallet.value.trim().length > 0 && !valid;
-    claimButton.disabled = !valid || wallet.value.trim() !== (document.querySelector("#wallet-confirm") as HTMLInputElement | null)?.value.trim();
+    claimButton.disabled = !valid;
     walletError.hidden = !showError;
     wallet.setAttribute("aria-invalid", showError ? "true" : "false");
     claimStatus.hidden = true;
   });
 
-  const walletConfirm = document.querySelector("#wallet-confirm");
-  if (walletConfirm instanceof HTMLInputElement) walletConfirm.addEventListener("input", () => {
-    claimButton.disabled = !isSolanaAddress(wallet.value) || wallet.value.trim() !== walletConfirm.value.trim();
-  });
-
   claimForm.addEventListener("submit", (event) => {
     event.preventDefault();
     const payout = currentSelection();
-    if (claimButton.disabled || !payout || !isSolanaAddress(wallet.value) || !(walletConfirm instanceof HTMLInputElement) || wallet.value.trim() !== walletConfirm.value.trim()) return;
+    if (claimButton.disabled || !payout || !isSolanaAddress(wallet.value)) return;
     const destination = wallet.value.trim();
     claimButton.disabled = true;
-    void confirmAction("Confirm SOL destination", `Send this claim to ${destination}? This address cannot be changed for this claim.`, "Submit claim").then(async (confirmed) => {
+    void confirmAction("Confirm SOL destination", "Review the wallet receiving your claim.", "Submit claim", destination).then(async (confirmed) => {
       if (!confirmed) { claimButton.disabled = false; return; }
       const result = await claimPayout(payout.xUserIds, destination);
-      claimStatus.hidden = false;
-      claimStatus.textContent = result?.ok && result.claim ? `Claim ${result.claim.status}; payment is not confirmed until finalized.` : result?.reason ?? "Couldn't submit claim; retry with the same destination";
       claimButton.disabled = Boolean(result?.ok);
-      if (!result?.ok || !result.claim) return;
+      if (!result?.ok || !result.claim) {
+        claimStatus.hidden = false;
+        claimStatus.textContent = result?.reason ?? "Couldn't submit claim; retry with the same destination";
+        return;
+      }
       setClaim(result.claim);
+      showScreen("activity");
       void refreshPrivateView(true);
-      void refreshClaimStatus();
+      void refreshClaimHistory().then(() => refreshClaimStatus());
     }).catch(() => { claimStatus.hidden = false; claimStatus.textContent = "Couldn't submit claim; retry with the same destination"; claimButton.disabled = false; });
   });
 
@@ -249,6 +258,7 @@ if (
 
   const homeView = home;
   const accountsView = accounts;
+  const activityView = activity;
   const settingsView = settingsPanel;
   const settingsButton = settings;
   const claimView = claim;
@@ -260,12 +270,12 @@ if (
   const claimMessage = claimStatus;
   const homeTab = navHome;
   const accountsTab = navAccounts;
+  const activityTab = navActivity;
 
   function openClaim(): void {
     const payout = currentSelection();
     if (!payout) return;
     walletInput.value = "";
-    if (walletConfirm instanceof HTMLInputElement) walletConfirm.value = "";
     walletInput.setAttribute("aria-invalid", "false");
     walletMessage.hidden = true;
     const label = `Claim ${formatSol(payout.balance)}`;
@@ -286,6 +296,7 @@ if (
     }
     homeView.hidden = screen !== "home";
     accountsView.hidden = screen !== "accounts";
+    activityView.hidden = screen !== "activity";
     settingsView.hidden = screen !== "settings";
     settingsButton.setAttribute("aria-expanded", String(screen === "settings"));
     claimView.hidden = screen !== "claim";
@@ -293,6 +304,7 @@ if (
     footerView.hidden = screen === "claim" || screen === "processing";
     markTab(homeTab, screen === "home");
     markTab(accountsTab, screen === "accounts");
+    markTab(activityTab, screen === "activity");
   }
 }
 
@@ -390,7 +402,7 @@ async function claimPayout(
 }
 
 async function checkClaim(xUserIds: string[]): Promise<boolean> {
-  const status = document.querySelector("#latest-claim");
+  const status = document.querySelector("#claim-eligibility");
   try {
     const result = await chrome.runtime.sendMessage({ type: "check-claim", xUserIds }) as { ok?: boolean; eligible?: boolean; reason?: string };
     if (result.ok && result.eligible) return true;
@@ -410,15 +422,20 @@ function hideRecoveryKey(): void {
   if (identityBackup instanceof HTMLButtonElement) identityBackup.textContent = "Reveal";
 }
 
-function confirmAction(title: string, detail: string, action: string): Promise<boolean> {
+function confirmAction(title: string, detail: string, action: string, destination?: string): Promise<boolean> {
   const dialog = document.querySelector("#confirm-action");
   const heading = document.querySelector("#confirm-action-title");
   const description = document.querySelector("#confirm-action-detail");
   const button = document.querySelector("#confirm-action-button");
-  if (!(dialog instanceof HTMLDialogElement) || dialog.open || !(heading instanceof HTMLElement) || !(description instanceof HTMLElement) || !(button instanceof HTMLButtonElement)) return Promise.resolve(false);
+  const wallet = document.querySelector("#confirm-action-wallet");
+  const address = document.querySelector("#confirm-action-address");
+  if (!(dialog instanceof HTMLDialogElement) || dialog.open || !(heading instanceof HTMLElement) || !(description instanceof HTMLElement) || !(button instanceof HTMLButtonElement) || !(wallet instanceof HTMLElement) || !(address instanceof HTMLElement)) return Promise.resolve(false);
   heading.textContent = title;
   description.textContent = detail;
   button.textContent = action;
+  wallet.hidden = !destination;
+  address.textContent = destination ?? "";
+  dialog.setAttribute("aria-describedby", destination ? "confirm-action-detail confirm-action-wallet" : "confirm-action-detail");
   dialog.returnValue = "";
   return new Promise((resolve) => {
     dialog.addEventListener("close", () => resolve(dialog.returnValue === "confirm"), { once: true });

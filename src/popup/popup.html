@@ -41,12 +41,20 @@
       <button id="payout-button" class="payout-button" type="button" hidden>Claim</button>
       <p id="payout-minimum" class="payout-minimum">Loading balances…</p>
     </section>
-    <p id="latest-claim" class="hint" role="status"></p>
+    <p id="claim-eligibility" class="hint" role="status"></p>
     <main id="timeline" class="timeline"></main>
     </div>
     <section id="accounts" class="accounts" hidden>
       <h1 class="accounts-title">My accounts</h1>
       <div id="accounts-list" class="accounts-list"></div>
+    </section>
+    <section id="activity" class="activity" aria-labelledby="activity-title" hidden>
+      <h1 id="activity-title" class="accounts-title">Claim activity</h1>
+      <div class="activity-body">
+        <div id="activity-list" class="activity-list"><p class="empty">Loading claims…</p></div>
+        <button id="activity-more" class="settings-action" type="button" hidden>Load more</button>
+        <p id="activity-refresh-error" class="activity-refresh-error" role="status" hidden></p>
+      </div>
     </section>
     <section id="settings-panel" class="settings" hidden>
       <div class="settings-heading">
@@ -111,11 +119,9 @@
         Back
       </button>
       <form id="claim-form" class="claim-form">
-        <p class="hint">USD balances are estimates. Claims are currently paid only in SOL.</p>
+        <p class="hint">USD balances are estimates.</p>
         <label for="wallet">SOL wallet</label>
         <input id="wallet" name="wallet" type="text" autocomplete="off" spellcheck="false" placeholder="Wallet address" aria-describedby="wallet-error" />
-        <label for="wallet-confirm">Confirm destination address</label>
-        <input id="wallet-confirm" name="wallet-confirm" type="text" autocomplete="off" spellcheck="false" placeholder="Enter the address again" />
         <p id="wallet-error" class="wallet-error" hidden>Not a valid Solana wallet</p>
         <button id="claim-button" type="submit" disabled>Claim</button>
         <p id="claim-status" class="claim-status" hidden></p>
@@ -136,6 +142,11 @@
       <form method="dialog">
         <h2 id="confirm-action-title"></h2>
         <p id="confirm-action-detail"></p>
+        <div id="confirm-action-wallet" class="confirm-wallet" hidden>
+          <span class="confirm-wallet-label">Destination wallet</span>
+          <code id="confirm-action-address"></code>
+          <p>This address cannot be changed for this claim.</p>
+        </div>
         <div class="confirm-actions">
           <button type="submit" value="cancel">Cancel</button>
           <button id="confirm-action-button" type="submit" value="confirm">Continue</button>
@@ -155,6 +166,11 @@
               fill="currentColor"
               d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"
             />
+          </svg>
+        </button>
+        <button id="nav-activity" class="icon-button" type="button" aria-label="Claim activity">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+            <path fill="currentColor" d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8zm1-13h-2v6l5 3 1-1.73-4-2.37z" />
           </svg>
         </button>
       </nav>
