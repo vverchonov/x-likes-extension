@@ -1,12 +1,20 @@
 import { X_PROFILE_URL, WEBSITE_URL } from "../config.ts";
-import { SIGNED_IN_ACCOUNTS_KEY, sameAccounts } from "../lib/accounts.ts";
 import { acceptDisclaimer, isDisclaimerAccepted } from "../lib/consent.ts";
-import { formatPayout } from "../lib/likes.ts";
+import { formatSol } from "../lib/private-data.ts";
 import { isSolanaAddress } from "../lib/solana.ts";
-import { clearEarnings, currentPayout, homePayout, mountTimeline, refreshEarnings, selectClaim } from "./timeline.ts";
+import { currentSelection, homeSelection, mountPrivateView, refreshClaimStatus, refreshPrivateView, rowSelection, selectClaim, setClaim } from "./private-view.ts";
 
-const timeline = document.querySelector("#timeline");
-const refresh = document.querySelector("#refresh");
+const toggle = document.querySelector("#capture-toggle");
+const settings = document.querySelector("#settings");
+const settingsPanel = document.querySelector("#settings-panel");
+const identityBackup = document.querySelector("#identity-backup");
+const identityReveal = document.querySelector("#identity-reveal");
+const identityBackupString = document.querySelector("#identity-backup-string");
+const identityCopy = document.querySelector("#identity-copy");
+const identityImport = document.querySelector("#identity-import");
+const identityImportButton = document.querySelector("#identity-import-button");
+const identityStatus = document.querySelector("#identity-status");
+const identityPublicKey = document.querySelector("#identity-public-key");
 const payoutButton = document.querySelector("#payout-button");
 const home = document.querySelector("#home");
 const accounts = document.querySelector("#accounts");
@@ -31,7 +39,6 @@ const siteLink = document.querySelector("#site-link");
 
 if (xLink instanceof HTMLAnchorElement) xLink.href = X_PROFILE_URL;
 if (siteLink instanceof HTMLAnchorElement) siteLink.href = WEBSITE_URL;
-
 const docsLink = document.querySelector("#docs-link");
 if (docsLink instanceof HTMLAnchorElement) docsLink.href = new URL("/docs", WEBSITE_URL).href;
 
@@ -62,13 +69,77 @@ async function openPopup(): Promise<void> {
 function unlockApp(): void {
   if (opened) return;
   opened = true;
-  document.body.classList.remove("is-locked");
-  if (timeline instanceof HTMLElement) {
-    mountTimeline(timeline, refresh instanceof HTMLButtonElement ? refresh : null);
+  if (hasExtensionStorage()) {
+    void chrome.runtime.sendMessage({ type: "identity-setup" }).then((response: { ok?: boolean; publicKey?: string }) => {
+      if (identityStatus instanceof HTMLElement) identityStatus.textContent = response.ok && response.publicKey
+        ? "Identity ready on this device" : "Identity setup unavailable";
+      if (response.ok && response.publicKey && identityPublicKey instanceof HTMLElement) identityPublicKey.textContent = response.publicKey;
+    }).catch(() => {
+      if (identityStatus instanceof HTMLElement) identityStatus.textContent = "Identity setup unavailable";
+    });
   }
+  document.body.classList.remove("is-locked");
+  mountPrivateView();
 }
 
-type Screen = "home" | "accounts" | "claim" | "processing";
+if (identityBackup instanceof HTMLButtonElement && identityBackupString instanceof HTMLTextAreaElement && identityCopy instanceof HTMLButtonElement) {
+  identityBackup.addEventListener("click", () => {
+    if (!identityBackupString.hidden) {
+      hideRecoveryKey();
+      if (identityStatus instanceof HTMLElement) identityStatus.textContent = "Recovery key hidden";
+      return;
+    }
+    void (async () => {
+      if (!(await confirmAction("Reveal recovery key?", "Anyone with this key can access your ScrollX identity. Only reveal it in private.", "Reveal key"))) return;
+      const response = await chrome.runtime.sendMessage({ type: "identity-backup" }) as { ok?: boolean; backup?: string };
+      if (!response.ok || !response.backup) throw new Error("Backup unavailable");
+      identityBackupString.value = response.backup;
+      if (identityReveal instanceof HTMLElement) identityReveal.hidden = false;
+      identityBackupString.hidden = false;
+      identityCopy.hidden = false;
+      identityBackup.textContent = "Hide";
+      identityBackupString.focus();
+      if (identityStatus instanceof HTMLElement) identityStatus.textContent = "Recovery key revealed. Store it somewhere safe.";
+    })().catch(() => {
+      if (identityStatus instanceof HTMLElement) identityStatus.textContent = "Backup failed";
+    });
+  });
+  identityCopy.addEventListener("click", () => {
+    if (!navigator.clipboard?.writeText) {
+      identityBackupString.select();
+      if (identityStatus instanceof HTMLElement) identityStatus.textContent = "Select and copy the recovery key manually.";
+      return;
+    }
+    void navigator.clipboard.writeText(identityBackupString.value).then(() => {
+      if (identityStatus instanceof HTMLElement) identityStatus.textContent = "Recovery key copied. Store it securely.";
+    }).catch(() => {
+      identityBackupString.select();
+      if (identityStatus instanceof HTMLElement) identityStatus.textContent = "Select and copy the recovery key manually.";
+    });
+  });
+}
+
+if (identityImport instanceof HTMLTextAreaElement && identityImportButton instanceof HTMLButtonElement) {
+  identityImport.addEventListener("input", () => { identityImportButton.disabled = !identityImport.value.trim(); });
+  identityImportButton.addEventListener("click", () => {
+    const backup = identityImport.value.trim();
+    if (!backup) return;
+    void (async () => {
+      if (!(await confirmAction("Replace this identity?", "Your current history may no longer be accessible without its recovery key. Your saved account list will be replaced.", "Import key"))) return;
+      if (backup.length > 16_384) throw new Error("Backup too large");
+      const response = await chrome.runtime.sendMessage({ type: "identity-import", backup }) as { ok?: boolean; publicKey?: string };
+      if (!response.ok || !response.publicKey) throw new Error("Import failed");
+      if (identityStatus instanceof HTMLElement) identityStatus.textContent = "Identity restored on this device";
+      if (identityPublicKey instanceof HTMLElement) identityPublicKey.textContent = response.publicKey;
+      hideRecoveryKey();
+      await refreshPrivateView(true);
+    })().catch(() => {
+      if (identityStatus instanceof HTMLElement) identityStatus.textContent = "Import failed: check the recovery key";
+    }).finally(() => { identityImport.value = ""; identityImportButton.disabled = true; });
+  });
+}
+
+type Screen = "home" | "accounts" | "settings" | "claim" | "processing";
 
 let claimOrigin: Screen = "home";
 
@@ -78,6 +149,8 @@ if (
   accounts instanceof HTMLElement &&
   navHome instanceof HTMLButtonElement &&
   navAccounts instanceof HTMLButtonElement &&
+  settings instanceof HTMLButtonElement &&
+  settingsPanel instanceof HTMLElement &&
   footer instanceof HTMLElement &&
   claim instanceof HTMLElement &&
   claimBack instanceof HTMLButtonElement &&
@@ -97,30 +170,40 @@ if (
     closeRemoveConfirm();
     showScreen("accounts");
   });
+  settings.addEventListener("click", () => {
+    closeRemoveConfirm();
+    showScreen(settingsPanel.hidden ? "settings" : "home");
+  });
 
   payoutButton.addEventListener("click", () => {
-    const payout = homePayout();
+    const payout = homeSelection();
     if (!payout) return;
-    claimOrigin = "home";
-    selectClaim(payout);
-    openClaim();
+    void checkClaim(payout.xUserIds).then((allowed) => {
+      if (!allowed) return;
+      claimOrigin = "home";
+      selectClaim(payout);
+      openClaim();
+    });
   });
 
   accounts.addEventListener("click", (event) => {
     const button = event.target instanceof Element ? event.target.closest("button") : null;
     if (!(button instanceof HTMLButtonElement)) return;
-    const username = button.dataset.username;
-    if (!username) return;
+    const xUserId = button.dataset.xUserId;
+    if (!xUserId) return;
     if (button.dataset.action === "remove") {
-      askToRemove(username);
+      askToRemove(xUserId, button.closest("article")?.querySelector(".label")?.textContent ?? xUserId);
       return;
     }
     if (button.dataset.action !== "claim") return;
-    const balance = Number(button.dataset.balance);
-    if (!Number.isFinite(balance)) return;
-    claimOrigin = "accounts";
-    selectClaim({ username, balance, accounts: [username] });
-    openClaim();
+    const selection = rowSelection(xUserId);
+    if (!selection) return;
+    void checkClaim(selection.xUserIds).then((allowed) => {
+      if (!allowed) return;
+      claimOrigin = "accounts";
+      selectClaim(selection);
+      openClaim();
+    });
   });
 
   claimBack.addEventListener("click", () => {
@@ -130,25 +213,34 @@ if (
   wallet.addEventListener("input", () => {
     const valid = isSolanaAddress(wallet.value);
     const showError = wallet.value.trim().length > 0 && !valid;
-    claimButton.disabled = !valid;
+    claimButton.disabled = !valid || wallet.value.trim() !== (document.querySelector("#wallet-confirm") as HTMLInputElement | null)?.value.trim();
     walletError.hidden = !showError;
     wallet.setAttribute("aria-invalid", showError ? "true" : "false");
     claimStatus.hidden = true;
   });
 
+  const walletConfirm = document.querySelector("#wallet-confirm");
+  if (walletConfirm instanceof HTMLInputElement) walletConfirm.addEventListener("input", () => {
+    claimButton.disabled = !isSolanaAddress(wallet.value) || wallet.value.trim() !== walletConfirm.value.trim();
+  });
+
   claimForm.addEventListener("submit", (event) => {
     event.preventDefault();
-    const payout = currentPayout();
-    if (!payout || !isSolanaAddress(wallet.value)) return;
+    const payout = currentSelection();
+    if (claimButton.disabled || !payout || !isSolanaAddress(wallet.value) || !(walletConfirm instanceof HTMLInputElement) || wallet.value.trim() !== walletConfirm.value.trim()) return;
+    const destination = wallet.value.trim();
     claimButton.disabled = true;
-    void claimPayout(payout.username, wallet.value.trim(), payout.balance, payout.accounts).then((ok) => {
+    void confirmAction("Confirm SOL destination", `Send this claim to ${destination}? This address cannot be changed for this claim.`, "Submit claim").then(async (confirmed) => {
+      if (!confirmed) { claimButton.disabled = false; return; }
+      const result = await claimPayout(payout.xUserIds, destination);
       claimStatus.hidden = false;
-      claimStatus.textContent = ok ? "Claim sent" : "Couldn't send claim";
-      claimButton.disabled = ok || !isSolanaAddress(wallet.value);
-      if (!ok) return;
-      clearEarnings();
-      void refreshEarnings();
-    });
+      claimStatus.textContent = result?.ok && result.claim ? `Claim ${result.claim.status}; payment is not confirmed until finalized.` : result?.reason ?? "Couldn't submit claim; retry with the same destination";
+      claimButton.disabled = Boolean(result?.ok);
+      if (!result?.ok || !result.claim) return;
+      setClaim(result.claim);
+      void refreshPrivateView(true);
+      void refreshClaimStatus();
+    }).catch(() => { claimStatus.hidden = false; claimStatus.textContent = "Couldn't submit claim; retry with the same destination"; claimButton.disabled = false; });
   });
 
   processingDone.addEventListener("click", () => {
@@ -157,6 +249,8 @@ if (
 
   const homeView = home;
   const accountsView = accounts;
+  const settingsView = settingsPanel;
+  const settingsButton = settings;
   const claimView = claim;
   const processingView = processing;
   const footerView = footer;
@@ -168,12 +262,13 @@ if (
   const accountsTab = navAccounts;
 
   function openClaim(): void {
-    const payout = currentPayout();
+    const payout = currentSelection();
     if (!payout) return;
     walletInput.value = "";
+    if (walletConfirm instanceof HTMLInputElement) walletConfirm.value = "";
     walletInput.setAttribute("aria-invalid", "false");
     walletMessage.hidden = true;
-    const label = `Claim ${formatPayout(payout.balance)}`;
+    const label = `Claim ${formatSol(payout.balance)}`;
     claimSubmit.textContent = label;
     claimSubmit.title = label;
     claimSubmit.disabled = true;
@@ -184,14 +279,33 @@ if (
   }
 
   function showScreen(screen: Screen): void {
+    if (screen !== "settings") {
+      hideRecoveryKey();
+      if (identityImport instanceof HTMLTextAreaElement) identityImport.value = "";
+      if (identityImportButton instanceof HTMLButtonElement) identityImportButton.disabled = true;
+    }
     homeView.hidden = screen !== "home";
     accountsView.hidden = screen !== "accounts";
+    settingsView.hidden = screen !== "settings";
+    settingsButton.setAttribute("aria-expanded", String(screen === "settings"));
     claimView.hidden = screen !== "claim";
     processingView.hidden = screen !== "processing";
     footerView.hidden = screen === "claim" || screen === "processing";
     markTab(homeTab, screen === "home");
     markTab(accountsTab, screen === "accounts");
   }
+}
+
+if (toggle instanceof HTMLButtonElement) {
+  void readEnabled().then((enabled) => {
+    render(toggle, enabled);
+  });
+
+  toggle.addEventListener("click", () => {
+    const next = toggle.getAttribute("aria-checked") !== "true";
+    render(toggle, next);
+    void writeEnabled(next);
+  });
 }
 
 watchAccountList();
@@ -201,17 +315,15 @@ let pendingRemoval = "";
 function watchAccountList(): void {
   if (typeof chrome === "undefined" || !chrome.storage?.onChanged) return;
   chrome.storage.onChanged.addListener((changes, area) => {
-    if (area !== "local" || !(SIGNED_IN_ACCOUNTS_KEY in changes)) return;
-    const change = changes[SIGNED_IN_ACCOUNTS_KEY];
-    if (!change || sameAccounts(change.oldValue, change.newValue)) return;
-    void refreshEarnings();
+    if (area !== "local" || !("trackedXAccounts" in changes)) return;
+    void refreshPrivateView(true);
   });
 }
 
-function askToRemove(username: string): void {
+function askToRemove(xUserId: string, label: string): void {
   if (!(confirmRemove instanceof HTMLElement) || !(confirmAccount instanceof HTMLElement)) return;
-  pendingRemoval = username;
-  confirmAccount.textContent = `@${username}`;
+  pendingRemoval = xUserId;
+  confirmAccount.textContent = label;
   confirmRemove.hidden = false;
 }
 
@@ -226,10 +338,10 @@ if (confirmCancel instanceof HTMLButtonElement) {
 
 if (confirmRemoveButton instanceof HTMLButtonElement) {
   confirmRemoveButton.addEventListener("click", () => {
-    const username = pendingRemoval;
+    const xUserId = pendingRemoval;
     closeRemoveConfirm();
-    if (!username) return;
-    void forgetAccount(username).then(() => refreshEarnings());
+    if (!xUserId) return;
+    void forgetAccount(xUserId).then(() => refreshPrivateView(true));
   });
 }
 
@@ -238,24 +350,78 @@ function markTab(button: HTMLButtonElement, current: boolean): void {
   else button.removeAttribute("aria-current");
 }
 
-async function forgetAccount(username: string): Promise<void> {
+async function forgetAccount(xUserId: string): Promise<void> {
   if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage) return;
-  await chrome.runtime.sendMessage({ type: "forget-account", username });
+  await chrome.runtime.sendMessage({ type: "forget-account", xUserId });
+}
+
+function render(button: HTMLButtonElement, enabled: boolean): void {
+  button.setAttribute("aria-checked", enabled ? "true" : "false");
+}
+
+async function readEnabled(): Promise<boolean> {
+  if (hasExtensionStorage()) {
+    const stored = await chrome.storage.local.get({ captureEnabled: true });
+    return stored.captureEnabled !== false;
+  }
+  return localStorage.getItem("captureEnabled") !== "false";
+}
+
+async function writeEnabled(enabled: boolean): Promise<void> {
+  if (hasExtensionStorage()) {
+    await chrome.storage.local.set({ captureEnabled: enabled });
+    return;
+  }
+  localStorage.setItem("captureEnabled", String(enabled));
 }
 
 async function claimPayout(
-  username: string,
+  xUserIds: string[],
   walletAddress: string,
-  balance: number,
-  accounts: string[],
-): Promise<boolean> {
-  if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage) return false;
+): Promise<{ ok?: boolean; reason?: string; claim?: import("../lib/private-data.ts").Claim } | null> {
+  if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage) return null;
   const response: unknown = await chrome.runtime.sendMessage({
     type: "claim-payout",
-    username,
-    usernames: accounts,
-    wallet: walletAddress,
-    balance,
+    xUserIds,
+    destination: walletAddress,
+    confirmedDestination: true,
   });
-  return Boolean(response) && typeof response === "object" && (response as { ok?: unknown }).ok === true;
+  return response && typeof response === "object" ? response as { ok?: boolean; reason?: string; claim?: import("../lib/private-data.ts").Claim } : null;
+}
+
+async function checkClaim(xUserIds: string[]): Promise<boolean> {
+  const status = document.querySelector("#latest-claim");
+  try {
+    const result = await chrome.runtime.sendMessage({ type: "check-claim", xUserIds }) as { ok?: boolean; eligible?: boolean; reason?: string };
+    if (result.ok && result.eligible) return true;
+    if (status) status.textContent = result.reason ? `Claim unavailable: ${result.reason.replaceAll("_", " ")}` : "Couldn't check claim eligibility";
+  } catch { if (status) status.textContent = "Couldn't check claim eligibility"; }
+  return false;
+}
+
+function hasExtensionStorage(): boolean {
+  return typeof chrome !== "undefined" && Boolean(chrome.storage?.local);
+}
+
+function hideRecoveryKey(): void {
+  if (identityBackupString instanceof HTMLTextAreaElement) { identityBackupString.value = ""; identityBackupString.hidden = true; }
+  if (identityCopy instanceof HTMLButtonElement) identityCopy.hidden = true;
+  if (identityReveal instanceof HTMLElement) identityReveal.hidden = true;
+  if (identityBackup instanceof HTMLButtonElement) identityBackup.textContent = "Reveal";
+}
+
+function confirmAction(title: string, detail: string, action: string): Promise<boolean> {
+  const dialog = document.querySelector("#confirm-action");
+  const heading = document.querySelector("#confirm-action-title");
+  const description = document.querySelector("#confirm-action-detail");
+  const button = document.querySelector("#confirm-action-button");
+  if (!(dialog instanceof HTMLDialogElement) || dialog.open || !(heading instanceof HTMLElement) || !(description instanceof HTMLElement) || !(button instanceof HTMLButtonElement)) return Promise.resolve(false);
+  heading.textContent = title;
+  description.textContent = detail;
+  button.textContent = action;
+  dialog.returnValue = "";
+  return new Promise((resolve) => {
+    dialog.addEventListener("close", () => resolve(dialog.returnValue === "confirm"), { once: true });
+    dialog.showModal();
+  });
 }

@@ -13,14 +13,14 @@
       <p>Nothing is collected until you agree. ScrollX does not watch X, save your account, or send a like before that.</p>
       <p>After you agree, liking, reposting, or commenting on a post on X sends that post:</p>
       <ul>
-        <li>Your X username and profile picture</li>
+        <li>Your X username, profile picture, and numeric account ID (required to send an observation)</li>
         <li>The post text, images, videos, and link</li>
         <li>The time you liked, reposted, or commented</li>
       </ul>
       <p>
         A reply to a comment under a post still sends the post, not the comment. Unlikes and removing a repost are not collected.
-        Your signed-in X username is saved on this device so this popup can show that account’s likes and earnings. A wallet address
-        is sent only if you later claim a payout.
+        Your signed-in X account is saved on this device. An exportable Ed25519 signing key is stored locally in the extension; its public key and signed requests identify this installation to the backend. Back up the private key to restore the same history on another installation. This key is not a payout wallet. A wallet address
+        is sent only if you later claim a payout. You can turn capture off in settings.
       </p>
       <label class="disclaimer-agree">
         <input id="disclaimer-agree" type="checkbox" />
@@ -37,19 +37,69 @@
     </header>
     <div id="home" class="home">
     <section class="payout" aria-label="Payout">
-      <p id="payout-balance" class="payout-balance">$0.00</p>
+      <p id="payout-balance" class="payout-balance">– SOL</p>
       <button id="payout-button" class="payout-button" type="button" hidden>Claim</button>
-      <p id="payout-minimum" class="payout-minimum">Payouts from $5+</p>
+      <p id="payout-minimum" class="payout-minimum">Loading balances…</p>
     </section>
+    <p id="latest-claim" class="hint" role="status"></p>
     <main id="timeline" class="timeline"></main>
     </div>
     <section id="accounts" class="accounts" hidden>
       <h1 class="accounts-title">My accounts</h1>
       <div id="accounts-list" class="accounts-list"></div>
     </section>
+    <section id="settings-panel" class="settings" hidden>
+      <div class="settings-heading">
+        <h1>Settings</h1>
+        <p>Control what ScrollX collects and keep your identity safe.</p>
+      </div>
+      <div class="settings-group">
+        <h2>Preferences</h2>
+        <div class="settings-card">
+          <div class="settings-row">
+            <div>
+              <p class="label">Capture engagements</p>
+              <p class="hint">Likes, reposts, and comments</p>
+            </div>
+            <button id="capture-toggle" type="button" role="switch" aria-checked="true" aria-label="Capture engagements">
+              <span class="knob"></span>
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="settings-group">
+        <h2>Security</h2>
+        <div class="settings-card">
+          <div class="settings-row">
+            <div>
+              <p class="label">Recovery key</p>
+              <p class="hint">Back it up to restore your history and accounts.</p>
+            </div>
+            <button id="identity-backup" class="settings-link" type="button">Reveal</button>
+          </div>
+          <div id="identity-reveal" class="identity-key" hidden>
+            <label for="identity-backup-string">Your recovery key</label>
+            <textarea id="identity-backup-string" readonly hidden spellcheck="false" aria-label="Your recovery key"></textarea>
+            <button id="identity-copy" class="settings-action" type="button" hidden>Copy recovery key</button>
+            <p class="hint">Anyone with this key can access your ScrollX identity. Keep it private.</p>
+          </div>
+          <div class="identity-key">
+            <label for="identity-import">Import recovery key</label>
+            <p class="hint">Replaces the identity and saved account list on this device.</p>
+            <textarea id="identity-import" autocomplete="off" spellcheck="false" placeholder="Paste your recovery key"></textarea>
+            <button id="identity-import-button" class="settings-action" type="button" disabled>Import key</button>
+          </div>
+        </div>
+        <p id="identity-status" role="status"></p>
+        <details class="public-identity">
+          <summary>View public identity</summary>
+          <code id="identity-public-key"></code>
+        </details>
+      </div>
+    </section>
     <section id="processing" class="processing" hidden>
       <div class="processing-body">
-        <p class="processing-title">Your payment is processing</p>
+        <p class="processing-title">Your claim is pending</p>
         <button id="processing-done" type="button">Done</button>
       </div>
     </section>
@@ -63,6 +113,8 @@
       <form id="claim-form" class="claim-form">
         <label for="wallet">SOL wallet</label>
         <input id="wallet" name="wallet" type="text" autocomplete="off" spellcheck="false" placeholder="Wallet address" aria-describedby="wallet-error" />
+        <label for="wallet-confirm">Confirm destination address</label>
+        <input id="wallet-confirm" name="wallet-confirm" type="text" autocomplete="off" spellcheck="false" placeholder="Enter the address again" />
         <p id="wallet-error" class="wallet-error" hidden>Not a valid Solana wallet</p>
         <button id="claim-button" type="submit" disabled>Claim</button>
         <p id="claim-status" class="claim-status" hidden></p>
@@ -70,15 +122,25 @@
     </section>
     <section id="confirm-remove" class="confirm" hidden>
       <div class="confirm-card">
-        <p class="confirm-title">Remove this account?</p>
+        <p class="confirm-title">Remove from this device?</p>
         <p id="confirm-account" class="confirm-account"></p>
-        <p class="confirm-note">It stays on X. Sign in or switch to this account and it shows here again.</p>
+        <p class="confirm-note">Your past activity and rewards are not deleted. This account will appear here again when you use it on X.</p>
         <div class="confirm-actions">
           <button id="confirm-cancel" type="button">Cancel</button>
-          <button id="confirm-remove-button" type="button">Remove</button>
+          <button id="confirm-remove-button" type="button">Remove here</button>
         </div>
       </div>
     </section>
+    <dialog id="confirm-action" class="confirm-dialog" aria-labelledby="confirm-action-title" aria-describedby="confirm-action-detail">
+      <form method="dialog">
+        <h2 id="confirm-action-title"></h2>
+        <p id="confirm-action-detail"></p>
+        <div class="confirm-actions">
+          <button type="submit" value="cancel">Cancel</button>
+          <button id="confirm-action-button" type="submit" value="confirm">Continue</button>
+        </div>
+      </form>
+    </dialog>
     <footer class="footer">
       <nav class="tabs" aria-label="Screens">
         <button id="nav-home" class="icon-button" type="button" aria-label="Home" aria-current="page">
@@ -102,6 +164,11 @@
               fill="currentColor"
               d="M17.65 6.35A7.96 7.96 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08a5.99 5.99 0 0 1-5.65 4c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z"
             />
+          </svg>
+        </button>
+        <button id="settings" class="icon-button" type="button" aria-label="Settings" aria-expanded="false" aria-controls="settings-panel">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+            <path fill="currentColor" d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.1 7.1 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54c-.58.23-1.12.54-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 8.48a.5.5 0 0 0 .12.64l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32c.13.23.4.32.64.22l2.39-.96c.5.4 1.05.72 1.63.94l.36 2.54c.05.24.26.42.5.42h3.84c.24 0 .45-.18.5-.42l.36-2.54c.58-.23 1.12-.54 1.63-.94l2.39.96c.24.1.51 0 .64-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58zM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5z" />
           </svg>
         </button>
       </div>

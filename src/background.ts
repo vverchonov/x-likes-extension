@@ -1,263 +1,394 @@
-import { BE_ENDPOINT } from "./config.ts";
-import { SIGNED_IN_ACCOUNTS_KEY, forgetAccount, rememberAccount, rememberedAccounts, sameAccounts } from "./lib/accounts.ts";
+import { isCaptureEnabled } from "./lib/capture.ts";
 import { isDisclaimerAccepted } from "./lib/consent.ts";
 import { httpsUrl } from "./lib/extract.ts";
-import {
-  type AccountEarning,
-  isLikedUsername,
-  likesUrl,
-  parseLikesList,
-  payoutClaim,
-  readLikesCache,
-} from "./lib/likes.ts";
-import type { LikedPost, LikedPostPayload, MediaItem } from "./lib/types.ts";
+import { forgetSession, privateRequest } from "./lib/api.ts";
+import { applicationPublicKey, exportBackup, importBackup } from "./lib/identity.ts";
+import { isLikedUsername } from "./lib/accounts.ts";
+import { type Balances, type Claim, type EventRow, type TrackedAccount, isXUserId, parseBalances, parseClaim, parseEvents, trackedAccounts, validIds } from "./lib/private-data.ts";
+import { isSolanaAddress } from "./lib/solana.ts";
+import type { LikedPostPayload, MediaItem } from "./lib/types.ts";
 
-const LIKES_CACHE_KEY = "likesCache";
+const ACCOUNTS_KEY = "trackedXAccounts";
+const CACHE_KEY = "privateHistoryV1";
+const CLAIM_KEY = "activeClaimV1";
+const CLAIM_ATTEMPT_KEY = "claimAttemptV1";
+const PENDING_PREFIX = "pendingObservation:";
+const CACHE_MS = 60_000;
+type SignedObservation = LikedPostPayload & { xUserId: string };
+type Snapshot = { publicKey: string; accounts: TrackedAccount[]; historyIds: string[]; events: EventRow[] | null; nextCursor: string | null; balances: Balances | null; fetchedAt: number };
+let claimInFlight: Promise<unknown> = Promise.resolve();
+let accountUpdates: Promise<unknown> = Promise.resolve();
+let observationUpdates: Promise<unknown> = Promise.resolve();
 
-chrome.runtime.onMessage.addListener((message: unknown, _sender, sendResponse) => {
+void retryObservations().catch((error) => console.error("Observation retry failed", error));
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes.captureEnabled?.newValue === true) {
+    void retryObservations().catch((error) => console.error("Observation retry failed", error));
+  }
+});
+
+chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
+  if (sender.id === chrome.runtime.id && sender.url === chrome.runtime.getURL("popup.html") && message && typeof message === "object") {
+    const request = message as { type?: unknown; backup?: unknown };
+    if (request.type === "identity-setup" || request.type === "identity-backup" || request.type === "identity-import") {
+      void (async () => {
+        if (!(await isDisclaimerAccepted())) throw new Error("Consent required");
+        if (request.type === "identity-import") {
+          if (typeof request.backup !== "string" || request.backup.length > 16_384) throw new Error("Invalid identity backup");
+          const oldKey = await applicationPublicKey();
+          forgetSession();
+          const restored = await importBackup(request.backup);
+          const changed = oldKey !== await applicationPublicKey();
+          const stored = await chrome.storage.local.get(null);
+          await chrome.storage.local.remove([CACHE_KEY, CLAIM_KEY, CLAIM_ATTEMPT_KEY, ...(changed ? Object.keys(stored).filter((key) => key.startsWith(PENDING_PREFIX)) : [])]);
+          if (changed || restored.length) await chrome.storage.local.set({ [ACCOUNTS_KEY]: restored });
+        }
+        const publicKey = await applicationPublicKey();
+        const backup = request.type === "identity-backup" ? await exportBackup(await readAccounts()) : undefined;
+        sendResponse({ ok: true, publicKey, backup });
+      })().catch(() => sendResponse({ ok: false }));
+      return true;
+    }
+  }
   const payload = likedPostPayload(message);
   if (payload) {
-    void deliver(payload);
+    if (!isContentSender(sender)) return;
+    void deliver(payload).catch((error) => console.error("Observation delivery failed", error));
     return;
   }
 
   const seen = seenAccount(message);
   if (seen) {
-    void rememberSeenAccount(seen);
+    if (!isContentSender(sender)) return;
+    void rememberSeenAccount(seen).catch((error) => console.error("Account tracking failed", error));
     return;
   }
 
+  if (!isPopupSender(sender)) return;
+
   const forgotten = forgetRequest(message);
   if (forgotten) {
-    void forgetStored(forgotten).then(() => {
-      sendResponse({ ok: true });
-    });
+    void forgetStored(forgotten).then(() => sendResponse({ ok: true })).catch(() => sendResponse({ ok: false }));
     return true;
   }
 
-  const request = likesRequest(message);
+  const request = dataRequest(message);
   if (request) {
-    void loadLikes(request.username, request.force).then((response) => {
-      sendResponse(response);
-    });
+    void loadData(request.force, request.xUserId).then((response) => sendResponse(response)).catch(() => sendResponse({ ok: false, reason: "failed" }));
+    return true;
+  }
+
+  if (message && typeof message === "object" && (message as { type?: unknown }).type === "history-next") {
+    const page = message as { cursor?: unknown; xUserId?: unknown };
+    void nextHistory(page.cursor, page.xUserId).then((response) => sendResponse(response)).catch(() => sendResponse({ ok: false }));
+    return true;
+  }
+
+  if (message && typeof message === "object" && (message as { type?: unknown }).type === "claim-status") {
+    void claimStatus().then((response) => sendResponse(response)).catch(() => sendResponse({ ok: false }));
+    return true;
+  }
+
+  if (message && typeof message === "object" && (message as { type?: unknown }).type === "check-claim") {
+    const ids = validIds((message as { xUserIds?: unknown }).xUserIds);
+    void (async () => {
+      if (!(await isDisclaimerAccepted()) || !ids.length) return { ok: false };
+      const publicKey = await applicationPublicKey();
+      const accounts = await readAccounts();
+      if (!ids.every((id) => accounts.some((account) => account.xUserId === id))) return { ok: false };
+      const response = await privateRequest("GET", `/v1/rewards/balances?xUserIds=${ids.join(",")}`);
+      if (!response.ok || publicKey !== await applicationPublicKey()) return { ok: false };
+      const balances = parseBalances(await response.json());
+      return { ok: true, eligible: balances.claimEligibility.available && !balances.accounts.some((account) => account.paused), reason: balances.claimEligibility.reason };
+    })().then(sendResponse).catch(() => sendResponse({ ok: false }));
     return true;
   }
 
   const claim = claimRequest(message);
   if (!claim) return;
-  void sendClaim(claim).then((ok) => {
-    sendResponse({ ok });
-  });
+  const operation = claimInFlight.then(() => sendClaim(claim));
+  claimInFlight = operation.catch(() => undefined);
+  void operation.then((response) => sendResponse(response)).catch(() => sendResponse({ ok: false }));
   return true;
 });
 
-async function deliver(payload: LikedPostPayload): Promise<void> {
+function isPopupSender(sender: chrome.runtime.MessageSender): boolean {
+  return sender.id === chrome.runtime.id && sender.url === chrome.runtime.getURL("popup.html");
+}
+
+function isContentSender(sender: chrome.runtime.MessageSender): boolean {
+  return sender.id === chrome.runtime.id && typeof sender.url === "string" && sender.url.startsWith("https://x.com/") && sender.tab?.id != null;
+}
+
+async function deliver(payload: SignedObservation): Promise<void> {
   if (!(await isDisclaimerAccepted())) return;
-  await storeAccount(payload.username);
+  await storeAccount({ xUserId: payload.xUserId, username: payload.username });
+  if (!(await isCaptureEnabled())) return;
+  const key = `${PENDING_PREFIX}${payload.xUserId}:${payload.postId}`;
+  const publicKey = await applicationPublicKey();
+  // Preserve the first undelivered observation even when another engagement
+  // reaches the background worker while its signed request is in flight.
+  const staged = observationUpdates.then(async () => {
+    if (await applicationPublicKey() !== publicKey) return null;
+    const existing = (await chrome.storage.local.get(key))[key] as { publicKey?: unknown; payload?: unknown } | undefined;
+    if (existing?.publicKey === publicKey) {
+      const first = asPayload(existing.payload);
+      if (first) return first;
+    }
+    await chrome.storage.local.set({ [key]: { publicKey, payload } });
+    return payload;
+  });
+  observationUpdates = staged.catch(() => undefined);
+  const first = await staged;
+  if (first) await flushObservation(key, first, publicKey);
+}
+
+async function flushObservation(key: string, payload: SignedObservation, publicKey: string): Promise<void> {
+  if (!(await isDisclaimerAccepted()) || !(await isCaptureEnabled())) return;
+  if (await applicationPublicKey() !== publicKey) return;
   const delivered = await postOnce(payload);
   if (!delivered) {
+    if (await applicationPublicKey() !== publicKey) return;
     const retried = await postOnce(payload);
     if (!retried) {
-      console.error("Failed to send liked post", payload.postId);
+      console.error("Failed to send observation", payload.postId);
       return;
     }
   }
-  await chrome.storage.local.remove(LIKES_CACHE_KEY);
+  if (await applicationPublicKey() !== publicKey) return;
+  const current = (await chrome.storage.local.get(key))[key] as { publicKey?: unknown; payload?: unknown } | undefined;
+  if (current?.publicKey === publicKey && JSON.stringify(asPayload(current.payload)) === JSON.stringify(payload)) await chrome.storage.local.remove(key);
+  await chrome.storage.local.remove(CACHE_KEY);
 }
 
-async function rememberSeenAccount(username: string): Promise<void> {
-  if (!(await isDisclaimerAccepted())) return;
-  await storeAccount(username);
-}
-
-async function loadLikes(
-  username: string | null,
-  force: boolean,
-): Promise<
-  | { ok: true; username: string; accounts: string[]; balance: number; balances: AccountEarning[]; likes: LikedPost[] }
-  | { ok: false; reason: "no-account" | "failed"; accounts: string[] }
-> {
-  if (!(await isDisclaimerAccepted())) return { ok: false, reason: "failed", accounts: [] };
-
-  const accounts = await readAccounts();
-  const current = listedAccount(username, accounts) ?? accounts.at(-1) ?? null;
-  if (!current || accounts.length === 0) return { ok: false, reason: "no-account", accounts };
-
-  if (!force) {
-    const stored = await chrome.storage.local.get(LIKES_CACHE_KEY);
-    const cached = readLikesCache(stored[LIKES_CACHE_KEY], accounts, Date.now());
-    if (cached) {
-      return {
-        ok: true,
-        username: current,
-        accounts,
-        balance: cached.balance,
-        balances: cached.balances,
-        likes: cached.likes,
-      };
-    }
+async function retryObservations(): Promise<void> {
+  if (!(await isDisclaimerAccepted()) || !(await isCaptureEnabled())) return;
+  const stored = await chrome.storage.local.get(null);
+  for (const [key, value] of Object.entries(stored)) {
+    if (!key.startsWith(PENDING_PREFIX)) continue;
+    if (!value || typeof value !== "object") continue;
+    const entry = value as { publicKey?: unknown; payload?: unknown };
+    const payload = asPayload(entry.payload);
+    if (payload && typeof entry.publicKey === "string") await flushObservation(key, payload, entry.publicKey);
   }
+}
 
+async function rememberSeenAccount(account: TrackedAccount): Promise<void> {
+  if (!(await isDisclaimerAccepted())) return;
+  await storeAccount(account);
+}
+
+async function readAccounts(): Promise<TrackedAccount[]> {
+  return trackedAccounts((await chrome.storage.local.get(ACCOUNTS_KEY))[ACCOUNTS_KEY]);
+}
+
+async function storeAccount(account: TrackedAccount): Promise<void> {
+  const update = accountUpdates.then(async () => {
+    const previous = await readAccounts();
+    const next = [...previous.filter((entry) => entry.xUserId !== account.xUserId), account];
+    if (JSON.stringify(previous) === JSON.stringify(next)) return;
+    await chrome.storage.local.set({ [ACCOUNTS_KEY]: next });
+    if (!previous.some((entry) => entry.xUserId === account.xUserId)) await chrome.storage.local.remove(CACHE_KEY);
+  });
+  accountUpdates = update.catch(() => undefined);
+  await update;
+}
+
+async function forgetStored(xUserId: string): Promise<void> {
+  if (!(await isDisclaimerAccepted())) return;
+  const update = accountUpdates.then(async () => {
+    const previous = await readAccounts();
+    await chrome.storage.local.set({ [ACCOUNTS_KEY]: previous.filter((account) => account.xUserId !== xUserId) });
+    await chrome.storage.local.remove(CACHE_KEY);
+  });
+  accountUpdates = update.catch(() => undefined);
+  await update;
+}
+
+function idsFor(accounts: TrackedAccount[]): string[] {
+  return accounts.map((account) => account.xUserId).sort();
+}
+
+function query(ids: string[], cursor?: string): string {
+  const params = new URLSearchParams({ xUserIds: ids.join(","), limit: "50" });
+  if (cursor) params.set("cursor", cursor);
+  return params.toString();
+}
+
+async function loadData(force: boolean, xUserId?: string): Promise<{ ok: true; data: Snapshot; claim: Claim | null } | { ok: false; reason: "no-account" | "failed"; accounts: TrackedAccount[] }> {
+  if (!(await isDisclaimerAccepted())) return { ok: false, reason: "failed", accounts: [] };
+  const accounts = await readAccounts();
+  if (!accounts.length) return { ok: false, reason: "no-account", accounts };
+  const ids = idsFor(accounts);
+  if (xUserId && !ids.includes(xUserId)) return { ok: false, reason: "failed", accounts };
+  const historyIds = xUserId ? [xUserId] : ids;
+  const publicKey = await applicationPublicKey();
+  const stored = await chrome.storage.local.get([CACHE_KEY, CLAIM_KEY]);
+  const cached = stored[CACHE_KEY] as Snapshot | undefined;
+  if (!force && cached && cached.publicKey === publicKey && Date.now() - cached.fetchedAt < CACHE_MS && JSON.stringify(ids) === JSON.stringify(idsFor(trackedAccounts(cached.accounts))) && JSON.stringify(historyIds) === JSON.stringify(cached.historyIds)) {
+    try {
+      if (publicKey !== await applicationPublicKey()) throw new Error("Identity changed during history read");
+      return { ok: true, data: { ...cached, accounts, ...(cached.events === null ? {} : parseEvents({ events: cached.events, nextCursor: cached.nextCursor })), balances: cached.balances === null ? null : parseBalances(cached.balances) }, claim: await readClaim() };
+    } catch { /* Fetch fresh data. */ }
+  }
   try {
-    const response = await fetch(likesUrl(BE_ENDPOINT, accounts), {
-      headers: { accept: "application/json" },
-    });
-    if (!response.ok) return { ok: false, reason: "failed", accounts };
-    const list = parseLikesList(await response.json());
-    await chrome.storage.local.set({
-      [LIKES_CACHE_KEY]: {
-        username: current,
-        accounts,
-        fetchedAt: Date.now(),
-        balance: list.balance,
-        balances: list.balances,
-        likes: list.likes,
-      },
-    });
-    return {
-      ok: true,
-      username: current,
-      accounts,
-      balance: list.balance,
-      balances: list.balances,
-      likes: list.likes,
-    };
+    const target = query(historyIds);
+    const [history, balances] = await Promise.all([
+      privateRequest("GET", `/v1/events?${target}`).then(async (response) => response.ok ? parseEvents(await response.json()) : null).catch(() => null),
+      privateRequest("GET", `/v1/rewards/balances?xUserIds=${ids.join(",")}`).then(async (response) => response.ok ? parseBalances(await response.json()) : null).catch(() => null),
+    ]);
+    if (publicKey !== await applicationPublicKey()) throw new Error("Identity changed during history read");
+    const data = { publicKey, accounts, historyIds, events: history?.events ?? null, nextCursor: history?.nextCursor ?? null, balances, fetchedAt: Date.now() };
+    if (history && balances) await chrome.storage.local.set({ [CACHE_KEY]: data });
+    return { ok: true, data, claim: await readClaim() };
   } catch (error) {
-    console.error("Like list request failed", error);
+    console.error("Private data request failed", error);
     return { ok: false, reason: "failed", accounts };
   }
 }
 
-async function readAccounts(): Promise<string[]> {
-  const stored = await chrome.storage.local.get(SIGNED_IN_ACCOUNTS_KEY);
-  return rememberedAccounts(stored[SIGNED_IN_ACCOUNTS_KEY]);
+async function nextHistory(value: unknown, xUserId?: unknown): Promise<{ ok: true; events: EventRow[]; nextCursor: string | null } | { ok: false }> {
+  if (!(await isDisclaimerAccepted()) || typeof value !== "string" || !value) return { ok: false };
+  const publicKey = await applicationPublicKey();
+  const accounts = await readAccounts();
+  if (!accounts.length) return { ok: false };
+  if (xUserId !== undefined && (!isXUserId(xUserId) || !accounts.some((account) => account.xUserId === xUserId))) return { ok: false };
+  const response = await privateRequest("GET", `/v1/events?${query(xUserId ? [xUserId] : idsFor(accounts), value)}`);
+  if (!response.ok || publicKey !== await applicationPublicKey()) return { ok: false };
+  return { ok: true, ...parseEvents(await response.json()) };
 }
 
-async function storeAccount(username: string): Promise<void> {
-  const previous = await readAccounts();
-  const next = rememberAccount(previous, username);
-  if (!next.added) {
-    if (previous.at(-1) !== next.accounts.at(-1)) {
-      await chrome.storage.local.set({ [SIGNED_IN_ACCOUNTS_KEY]: next.accounts });
-    }
-    return;
-  }
-  await chrome.storage.local.remove(LIKES_CACHE_KEY);
-  await chrome.storage.local.set({ [SIGNED_IN_ACCOUNTS_KEY]: next.accounts });
-}
-
-async function forgetStored(username: string): Promise<void> {
-  if (!(await isDisclaimerAccepted())) return;
-  const previous = await readAccounts();
-  const next = forgetAccount(previous, username);
-  if (sameAccounts(previous, next)) return;
-  await chrome.storage.local.remove(LIKES_CACHE_KEY);
-  await chrome.storage.local.set({ [SIGNED_IN_ACCOUNTS_KEY]: next });
-}
-
-function listedAccount(username: string | null, accounts: readonly string[]): string | null {
-  if (!username) return null;
-  const key = username.toLowerCase();
-  return accounts.find((account) => account.toLowerCase() === key) ?? null;
-}
-
-async function postOnce(payload: LikedPostPayload): Promise<boolean> {
+async function readClaim(): Promise<Claim | null> {
+  const stored = (await chrome.storage.local.get(CLAIM_KEY))[CLAIM_KEY] as { publicKey?: string; claim?: unknown } | undefined;
+  if (!stored) return null;
   try {
-    const response = await fetch(BE_ENDPOINT, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(payload),
-    });
+    if (stored.publicKey !== await applicationPublicKey()) return null;
+    return parseClaim(stored.claim);
+  } catch { return null; }
+}
+
+async function claimStatus(): Promise<{ ok: true; claim: Claim | null } | { ok: false }> {
+  if (!(await isDisclaimerAccepted())) return { ok: false };
+  const existing = await readClaim();
+  if (!existing) return { ok: true, claim: null };
+  const publicKey = await applicationPublicKey();
+  const response = await privateRequest("GET", `/v1/rewards/claims/${encodeURIComponent(existing.id)}`);
+  if (!response.ok || publicKey !== await applicationPublicKey()) return { ok: false };
+  const claim = parseClaim(await response.json());
+  if (claim.id !== existing.id || publicKey !== await applicationPublicKey()) return { ok: false };
+  await chrome.storage.local.set({ [CLAIM_KEY]: { publicKey, claim } });
+  if (claim.status !== existing.status) await chrome.storage.local.remove(CACHE_KEY);
+  return { ok: true, claim };
+}
+
+async function postOnce(payload: SignedObservation): Promise<boolean> {
+  try {
+    const response = await privateRequest("POST", "/v1/events", payload);
     if (!response.ok) {
-      console.error("Like endpoint returned", response.status);
+      console.error("Observation endpoint returned", response.status);
       return false;
     }
     return true;
   } catch (error) {
-    console.error("Like endpoint request failed", error);
+    console.error("Observation endpoint request failed", error);
     return false;
   }
 }
 
 async function sendClaim(claim: {
-  username: string;
-  wallet: string;
-  balance: number;
-  accounts: string[];
-}): Promise<boolean> {
-  if (!(await isDisclaimerAccepted())) return false;
-  const accounts = claim.accounts.length > 0 ? claim.accounts : await readAccounts();
-  const body = payoutClaim(claim.username, claim.wallet, claim.balance, accounts);
-  if (!body) return false;
+  xUserIds: string[];
+  destination: string;
+}): Promise<{ ok: true; claim: Claim } | { ok: false; reason?: string }> {
+  if (!(await isDisclaimerAccepted())) return { ok: false };
+  const accounts = await readAccounts();
+  if (!claim.xUserIds.length || !claim.xUserIds.every((id) => accounts.some((account) => account.xUserId === id))) return { ok: false };
   try {
-    const response = await fetch(BE_ENDPOINT, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
+    const publicKey = await applicationPublicKey();
+    const saved = (await chrome.storage.local.get([CLAIM_ATTEMPT_KEY, CLAIM_KEY]));
+    const storedAttempt = saved[CLAIM_ATTEMPT_KEY] as { publicKey?: string; xUserIds?: string[]; destination?: string; idempotencyKey?: string } | undefined;
+    const previous = storedAttempt?.publicKey === publicKey ? storedAttempt : undefined;
+    const storedClaim = saved[CLAIM_KEY] as { publicKey?: string; claim?: unknown } | undefined;
+    const active = storedClaim?.publicKey === publicKey ? parseClaim(storedClaim.claim) : null;
+    if (active && (active.status === "pending" || active.status === "held") && (active.destination !== claim.destination || JSON.stringify(previous?.xUserIds) !== JSON.stringify(claim.xUserIds))) return { ok: false, reason: "A claim is still pending or held" };
+    if (previous && !active && (previous.destination !== claim.destination || JSON.stringify(previous.xUserIds) !== JSON.stringify(claim.xUserIds))) return { ok: false, reason: "Retry the previous claim with its original destination and accounts until its outcome is known" };
+    const idempotencyKey = previous?.destination === claim.destination && JSON.stringify(previous.xUserIds) === JSON.stringify(claim.xUserIds) && (!active || active.status === "pending" || active.status === "held") && previous.idempotencyKey || crypto.randomUUID();
+    await chrome.storage.local.set({ [CLAIM_ATTEMPT_KEY]: { ...claim, idempotencyKey, publicKey } });
+    const response = await privateRequest("POST", "/v1/rewards/claims", { ...claim, idempotencyKey, confirmedDestination: true });
+    if (publicKey !== await applicationPublicKey()) return { ok: false, reason: "Identity changed during claim" };
     if (!response.ok) {
-      console.error("Payout endpoint returned", response.status);
-      return false;
+      if ([400, 403, 409].includes(response.status)) await chrome.storage.local.remove(CLAIM_ATTEMPT_KEY);
+      const body: unknown = await response.json().catch(() => null);
+      const code = body && typeof body === "object" && "error" in body && body.error && typeof body.error === "object" && "code" in body.error ? body.error.code : null;
+      const reasons: Record<string, string> = {
+        below_minimum: "Available rewards are below $5",
+        disputed: "Claims for this X account are paused",
+        quote_stale: "Waiting for an updated SOL price; try again soon",
+        quote_unavailable: "SOL price is unavailable; try again later",
+        unauthorized: "This X account is not authorized for rewards",
+        claim_conflict: "Claim destination or account selection conflicts with the previous request",
+        destination_unconfirmed: "Confirm the payout destination",
+      };
+      return { ok: false, reason: typeof code === "string" ? reasons[code] ?? `Claim unavailable (${response.status})` : `Claim unavailable (${response.status})` };
     }
-    await chrome.storage.local.remove(LIKES_CACHE_KEY);
-    return true;
+    const accepted = parseClaim(await response.json());
+    if (accepted.destination !== claim.destination || publicKey !== await applicationPublicKey()) return { ok: false };
+    await chrome.storage.local.set({ [CLAIM_KEY]: { publicKey, claim: accepted } });
+    await chrome.storage.local.remove(CACHE_KEY);
+    return { ok: true, claim: accepted };
   } catch (error) {
-    console.error("Payout endpoint request failed", error);
-    return false;
+    console.error("Claim request failed", error);
+    return { ok: false };
   }
 }
 
 function claimRequest(message: unknown): {
-  username: string;
-  wallet: string;
-  balance: number;
-  accounts: string[];
+  xUserIds: string[];
+  destination: string;
 } | null {
   if (!message || typeof message !== "object") return null;
   const record = message as Record<string, unknown>;
   if (record.type !== "claim-payout") return null;
-  if (!isLikedUsername(record.username) || typeof record.wallet !== "string") return null;
-  if (typeof record.balance !== "number" || !Number.isFinite(record.balance)) return null;
+  const xUserIds = validIds(record.xUserIds);
+  if (!xUserIds.length || typeof record.destination !== "string" || !isSolanaAddress(record.destination) || record.confirmedDestination !== true) return null;
   return {
-    username: record.username,
-    wallet: record.wallet,
-    balance: record.balance,
-    accounts: rememberedAccounts(record.usernames),
+    xUserIds: xUserIds.sort(),
+    destination: record.destination.trim(),
   };
 }
 
-function likesRequest(message: unknown): { username: string | null; force: boolean } | null {
+function dataRequest(message: unknown): { force: boolean; xUserId?: string } | null {
   if (!message || typeof message !== "object") return null;
   const record = message as Record<string, unknown>;
-  if (record.type !== "load-likes") return null;
-  return { username: isLikedUsername(record.username) ? record.username : null, force: record.force === true };
+  if (record.type !== "load-private-data") return null;
+  return { force: record.force === true, xUserId: isXUserId(record.xUserId) ? record.xUserId : undefined };
 }
 
 function forgetRequest(message: unknown): string | null {
   if (!message || typeof message !== "object") return null;
   const record = message as Record<string, unknown>;
-  if (record.type !== "forget-account" || !isLikedUsername(record.username)) return null;
-  return record.username;
+  if (record.type !== "forget-account" || !isXUserId(record.xUserId)) return null;
+  return record.xUserId;
 }
 
-function seenAccount(message: unknown): string | null {
+function seenAccount(message: unknown): TrackedAccount | null {
   if (!message || typeof message !== "object") return null;
   const record = message as Record<string, unknown>;
-  if (record.type !== "seen-account" || !isLikedUsername(record.username)) return null;
-  return record.username;
+  if (record.type !== "seen-account" || !isLikedUsername(record.username) || !isXUserId(record.xUserId)) return null;
+  return { xUserId: record.xUserId, username: record.username };
 }
 
-function likedPostPayload(message: unknown): LikedPostPayload | null {
+function likedPostPayload(message: unknown): SignedObservation | null {
   if (!message || typeof message !== "object") return null;
   const record = message as Record<string, unknown>;
   if (record.type !== "liked-post") return null;
   return asPayload(record.payload);
 }
 
-function asPayload(value: unknown): LikedPostPayload | null {
+function asPayload(value: unknown): SignedObservation | null {
   if (!value || typeof value !== "object") return null;
   const record = value as Record<string, unknown>;
   if (
+    typeof record.xUserId !== "string" || !/^[1-9][0-9]{0,19}$/.test(record.xUserId) ||
     typeof record.postId !== "string" ||
     typeof record.username !== "string" ||
     typeof record.url !== "string" ||
@@ -278,6 +409,7 @@ function asPayload(value: unknown): LikedPostPayload | null {
   }
 
   return {
+    xUserId: record.xUserId,
     postId: record.postId,
     username: record.username,
     avatarUrl: httpsUrl(record.avatarUrl),

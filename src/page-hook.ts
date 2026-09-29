@@ -1,5 +1,6 @@
 import { CAPTURE_CONSENT_ATTR } from "./lib/consent.ts";
 import {
+  collectAccountIds,
   collectTweets,
   engagementFromRequest,
   isEngagementOperation,
@@ -54,6 +55,16 @@ function install(): void {
   window.fetch = captureFetch;
   XMLHttpRequest.prototype.open = captureOpen;
   XMLHttpRequest.prototype.send = captureSend;
+  // X may have loaded the signed-in account before consent enabled interception.
+  const initialState = (window as Window & { __INITIAL_STATE__?: unknown }).__INITIAL_STATE__;
+  if (initialState && typeof initialState === "object") {
+    const state = initialState as { session?: { user_id?: unknown }; entities?: { users?: { entities?: Record<string, unknown> } } };
+    const id = state.session?.user_id;
+    if (typeof id === "string" && /^[1-9][0-9]{0,19}$/.test(id)) {
+      publishAccounts(state.entities?.users?.entities?.[id]);
+    }
+    publishAccounts(initialState);
+  }
 }
 
 async function captureFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
@@ -120,7 +131,10 @@ async function publishEngagement(engagement: OutgoingEngagement, response: Respo
 function publishResolvedEngagement(engagement: OutgoingEngagement): void {
   switch (engagement.kind) {
     case "like":
-      publishFavorite(engagement.tweetId, cache.get(engagement.tweetId) ?? null, "like", false);
+      {
+        const resolved = originalPostForEngagement(cache, engagement.tweetId);
+        publishFavorite(resolved?.postId ?? engagement.tweetId, resolved?.tweet ?? null, "like", Boolean(resolved));
+      }
       return;
     case "repost":
     case "comment": {
@@ -169,6 +183,13 @@ function harvestText(text: string): void {
 
 function harvestValue(value: unknown): void {
   rememberTweets(cache, collectTweets(value));
+  publishAccounts(value);
+}
+
+function publishAccounts(value: unknown): void {
+  for (const account of collectAccountIds(value)) {
+    window.postMessage({ source: PAGE_MESSAGE_SOURCE, type: "account-id", ...account }, window.location.origin);
+  }
 }
 
 async function readEngagement(

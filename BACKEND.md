@@ -1,119 +1,25 @@
-# Backend integration
+# Backend integration (pre-release)
 
-The extension talks to one URL, `BE_ENDPOINT`. In production that URL is `https://api.scrollx.app`. That URL receives a like and, when the popup needs a fresh list, returns likes for every X account the extension has seen that person sign in with. The payout balance is for that same list. There is no auth header and no cookie. The extension calls the URL from its own background worker, so the backend does not need browser CORS for these requests.
+The shared `content-to-token-v1` contract lives in the registered `x-ext-specstore` OpenSpec store. The backend's `BACKEND.md` documents the concrete `/v1` wire format. `BE_ENDPOINT` is `https://api.scrollx.app/v1/events` in production; the background service worker uses its origin for auth and signed private requests.
 
-A like is sent only after the person has agreed to the data disclaimer, capture is on, and the signed-in X handle can be read. The same POST is sent when that person reposts a post or comments on it. The body is always the original post, including when they reply to a comment under that post. The comment’s own text is not sent. Unlikes and removing a repost are not sent. Nothing is sent before that agreement. If the POST fails, the extension tries once more. The popup does not ask for the list on every like, repost, or comment.
+## Signed event delivery
 
-## Send a like, repost, or comment
+After the versioned disclosure is accepted and capture is enabled, the X page observer collects successful likes, reposts and comments on original posts. It may associate a numeric X user ID with the active account when an observed X GraphQL `User` record pairs `rest_id` with the active account's screen name. The extension does not send observations without that numeric ID. If the ID is not observed, delivery remains unavailable; a handle is not an identity fallback.
 
-`POST {BE_ENDPOINT}`
+The background worker stores an exportable Ed25519 application identity in extension IndexedDB and exposes backup/import only to the popup. Settings reveals a copyable `scrollx-identity-v1:` private key string; pasting it restores the identity and locally tracked numeric account IDs/display handles. Earlier JSON backups remain importable as pasted strings. Neither the private key nor the backend session token is sent to the X page or content script. It obtains a session using `/v1/auth/challenges` and `/v1/auth/sessions`, then signs each private request with a fresh nonce and the exact body bytes. An expired session is renewed in the background. Failed event deliveries remain queued in local storage for retry when the background worker restarts; retries sign anew and the backend returns the first receipt and intent for the same key, reported X ID and original post. No X cookies are sent to the backend. Account IDs observed from X are client-reported and do not prove account ownership.
 
-`Content-Type: application/json`
+An observation has `xUserId` (numeric string), `postId`, `username` (display metadata), `avatarUrl`, `text`, `media`, `url` (original post), and `likedAt` (observation time). Action kind is not sent. The backend does not accept handle-only events or history filters.
 
-```json
-{
-  "postId": "123",
-  "username": "current_user",
-  "avatarUrl": "https://pbs.twimg.com/profile_images/1/avatar.jpg",
-  "text": "post text or null",
-  "media": [{ "type": "image", "url": "https://pbs.twimg.com/media/abc.jpg" }],
-  "url": "https://x.com/i/status/123",
-  "likedAt": "2026-09-21T19:20:00.000Z"
-}
-```
+## Private history
 
-| Field | Type | Meaning |
-| --- | --- | --- |
-| `postId` | string | X status id of the original post. A repost or comment uses that post, not the comment. A reply to a comment under the post still uses the post. |
-| `username` | string | The one account that liked, reposted, or commented, without `@`. Read from the open X page on that action. 1–15 letters, numbers, or underscores. Switching accounts does not change an action that was already sent. |
-| `avatarUrl` | string or `null` | Profile image URL for that account. `null` when X did not show one. Only `https` URLs are sent. |
-| `text` | string or `null` | Post text. `null` when the post has none, or when the extension only knew the post id and could not read the caption. |
-| `media` | array | Images and videos on that post. Each item is `{ "type": "image" \| "video", "url": "https://..." }`. Empty when there is no media, or when the caption could not be read. |
-| `url` | string | `https://x.com/i/status/{postId}`. |
-| `likedAt` | string | ISO-8601 time when the extension saw the like, repost, or comment. |
+Tracked accounts are `{ "xUserId": "12345", "username": "alice" }`, stored locally by numeric ID. A handle rename updates the label; removing an account removes it from the local view only. There is no handle-based query or legacy account migration. A signed `GET /v1/events?xUserIds=12345&limit=50` returns `{ "events": [], "nextCursor": null }` for an empty history. A nonempty event contains the original observation plus `id`, `receivedAt`, `status: "received"`, `xUserId`, `intentId`, `processingStatus`, nullable `tokenUrl`, and `creatorEarningsLamports`. Statuses are `pending`, `deferred`, `grounding`, `filtering`, `rejected`, `manual_review`, `generating`, `ready`, `sending`, `unresolved`, `finalized`, `failed`. For nonfinalized events `creatorEarningsLamports` is `null`; finalized tokens have cumulative creator fee allocation in decimal lamports, including `"0"` when none have accrued. For example, a pending row includes `{ "processingStatus": "pending", "tokenUrl": null, "creatorEarningsLamports": null }`; after finality and collected fees the same row includes `{ "processingStatus": "finalized", "tokenUrl": "https://pump.fun/coin/<mint>", "creatorEarningsLamports": "75000000" }`. These rewards are attributed to the reported X ID and token, not necessarily claimable by the submitting key after canonical dispute resolution. Claimable funds are shown only in the separate authorized SOL balances response. Only finalized events may link to a token. Pagination sends the opaque cursor on the same filtered signed GET, each with a fresh nonce. Receipt persistence is not token creation. The popup loads the first page for all tracked accounts or a selected numeric ID and lets the user load more; refresh retrieves a fresh first page.
 
-A `2xx` response means the like was accepted. Any other status, or a network failure, is a failure. The body of the POST response is ignored.
+## SOL balances and claims
 
-The same post can be sent again if the person likes, reposts, or comments on it again. Treat `postId` plus `username` as the engagement to store. A comment does not add a second post id for the reply. There is no field that says whether this POST was a like, a repost, or a comment. A later POST for the same `postId` and `username` may arrive with `text: null` and `media: []` when the extension could not read the post. Keep a caption and media already stored for that pair.
+Signed `GET /v1/rewards/balances?xUserIds=12345` returns `{ "accounts": [{ "xUserId": "12345", "availableLamports": "25000000", "pendingLamports": "0", "claimedLamports": "5000000", "paused": false }], "combined": { "availableLamports": "25000000", "pendingLamports": "0", "claimedLamports": "5000000" }, "claimEligibility": { "available": false, "reason": "below_minimum", "solUsd": "100.000000", "quoteAt": "2026-09-21T19:20:00.000Z" } }`. All lamport amounts are decimal strings. Eligibility reasons include `below_minimum`, `quote_unavailable`, `disputed`, `unauthorized`; a missing quote blocks a new claim but does not hide balances. The latest valid server quote remains usable until CoinGecko publishes a newer observation. The popup shows loading/error/empty independently, and never substitutes an unknown balance with zero. It checks selected IDs with a fresh signed balances read before opening the claim form.
 
-## List likes
+After the user enters the same valid destination twice and confirms the submit dialog, the popup sends `confirmedDestination: true` to the background. Only messages from the trusted popup may initiate claims; a content script cannot supply confirmation. The background sends signed `POST /v1/rewards/claims` with `{ "xUserIds": ["12345"], "destination": "<Solana address>", "idempotencyKey": "<uuid>", "confirmedDestination": true }`. Home selects all tracked IDs; a row selects that one ID. Combined eligibility may be `unauthorized` when one tracked ID has no reward authority; an authorized row can still be eligible and is checked by its own signed balances read. The background persists an identity-scoped idempotency key for retries to the same selection and destination. No client amount is sent. An accepted claim contains `id`, `status`, `amountLamports`, `destination`, `transactionSignature` (nullable). `GET /v1/rewards/claims/<id>` refreshes status; `pending`, `held`, `confirmed`, `failed`, and `canceled` are distinct. A 2xx acceptance means pending, not paid. The application identity is not a payout wallet, and the extension does not create or send chain transactions.
 
-`GET {BE_ENDPOINT}?usernames={handle},{other_handle}`
+Successful history and balances reads share a one-minute first-page cache keyed by numeric-ID set, history filter and application public key. If either read fails, the popup keeps the other visible and shows an error for the failed read; it does not cache an error as empty data. Submission or claim invalidates the cache; adding/removing a tracked ID and importing a different identity also invalidates it. A handle change updates display metadata without changing the selected ID. Subsequent pagination uses the signed cursor and exact filter. A fresh history read updates cumulative per-token attribution; the popup does not use it to calculate a claim balance.
 
-`Accept: application/json`
-
-`usernames` is every unique account the extension has seen this person sign in with, comma-separated, with the latest switch last. The extension records an account the first time it can read the signed-in handle on an open X page, and again each time that person switches accounts. The same handle is stored once. `likes` is every like, repost, and comment stored for those accounts, not only the account open on X. `balance` is the combined USD payout for that whole list.
-
-The extension keeps the last successful list for **1 minute**, and only while the set of `usernames` is unchanged. Opening the popup inside that minute shows the saved list and does not call the backend. Opening it after a minute, or adding or removing a tracked account, calls `GET` again. Switching which account is open on X does not, while that account is already in the set. **Refresh** at the bottom of the popup always calls `GET`. A successful like, repost, or comment POST clears the saved list, so the next time the popup opens it calls `GET` again. A successful payout claim clears the saved list and calls `GET` again immediately.
-
-```json
-{
-  "balance": 12.5,
-  "balances": [
-    { "username": "other_user", "balance": 4 },
-    { "username": "current_user", "balance": 8.5 }
-  ],
-  "likes": [
-    {
-      "postId": "123",
-      "username": "current_user",
-      "avatarUrl": "https://pbs.twimg.com/profile_images/1/avatar.jpg",
-      "text": "post text or null",
-      "media": [{ "type": "image", "url": "https://pbs.twimg.com/media/abc.jpg" }],
-      "url": "https://x.com/i/status/123",
-      "likedAt": "2026-09-21T19:20:00.000Z",
-      "coinUrl": "https://pump.fun/coin/abc",
-      "earning": 4.25
-    }
-  ]
-}
-```
-
-The body is a JSON object with `balance`, `balances`, and a `likes` array. `likes` includes each tracked account. A row’s `username` is the account that liked, reposted, or commented on that post, so the same post can appear once per account. The home screen shows that whole list together, newest `likedAt` first, with `@username` on each row. Post `text` can be the full caption. The popup shows at most three lines. `balance` is the combined USD amount the accounts in `usernames` can receive. A missing or invalid `balance` is shown as `$0.00`. The popup enables **Claim** on the home screen only when that combined `balance` is greater than `5`. At `$5` or below it hides that button and shows “Payouts from $5+”. Home **Claim** pays every account in `usernames` together.
-
-`balances` is one entry per saved account: `{ "username", "balance" }`. The accounts screen lists every handle saved in the extension. **Claim** on a row is enabled only when that account’s balance is greater than `5`, and the claim body then lists only that username. A handle missing from `balances`, or a list request that fails, shows `-` for that row and no claim button. An entry that is present with a missing or invalid `balance` is shown as `$0.00`.
-
-A like is skipped when `postId`, `username`, `url`, or `likedAt` is missing, when `text` is not a string or `null`, or when `media` is not an array of image and video URLs.
-
-| Field | Type | Meaning |
-| --- | --- | --- |
-| `postId`, `username`, `text`, `media`, `url`, `likedAt` | same as POST | Shown on the liked post. `text` longer than three lines is truncated in the popup. |
-| `avatarUrl` | string or `null` | Shown beside the handle when it is an `https` URL. Missing or anything else shows no image. |
-| `coinUrl` | string or `null` | Page for the coin that like created. An `http` or `https` URL becomes **view coin**. `null`, a missing field, or any other value shows no coin link. |
-| `earning` | number or `null` | USD earned from that coin. Shown only when `coinUrl` is an `http` or `https` page. A finite number of zero or more is white text at the right of the post, reading “earned” plus the amount, for example `earned $4.25`. There is no claim button for a coin. `null`, a missing field, a negative number, or any other value shows no earnings text. An `earning` without a coin link is not shown. |
-
-`200` with `"likes": []` is an empty list. The popup says “No likes yet”. A non-`2xx` response, a network failure, or a body that is not an object with a `likes` array is a load error. The popup says “Couldn't load likes”.
-
-Return `coinUrl` only after the coin exists. Until then use `null`. The popup does not poll for that change. The person can press **Refresh**, or open the popup again after the one-minute cache, to see a coin that was created later.
-
-Removing an account in the popup only drops it from the saved list. It is not deleted on X. Signing in or switching to that account adds it again. Adding or removing an account clears the saved list and calls `GET` again right away, so the home total, the likes, and each account balance match the accounts still saved.
-
-## Claim a payout
-
-`POST {BE_ENDPOINT}`
-
-`Content-Type: application/json`
-
-```json
-{
-  "type": "payout",
-  "username": "current_user",
-  "usernames": ["other_user", "current_user"],
-  "wallet": "11111111111111111111111111111111",
-  "balance": 12.5
-}
-```
-
-| Field | Type | Meaning |
-| --- | --- | --- |
-| `type` | `"payout"` | This body is a payout claim, not a like, repost, or comment. |
-| `username` | string | Account this claim is paid to. Home uses the account open on X when that account is still saved, and otherwise the latest saved account. An account row uses that row. |
-| `usernames` | string array | Accounts included in this payout. Home sends every saved account. A row sends only that account. |
-| `wallet` | string | Solana address where the person wants the payout. |
-| `balance` | number | USD amount shown for this claim. Home sends the combined total. A row sends that account’s balance. |
-
-A `2xx` response means the claim was accepted. Any other status is a failure, and the popup lets the person try again.
-
-Home **Claim** and a row **Claim** open a screen for a Solana wallet. **Claim** stays off until the address is a 32-byte Solana public key, then sends the claim above.
-
-A successful claim must lower both the combined `balance` and the claimed account’s entry in `balances`. The extension deletes its saved list as soon as the claim returns `2xx`, then calls `GET` again, so the home total and the accounts screen both drop the withdrawn amount.
+The extension displays initial loading, empty results, explicit read errors, unavailable quotes, and last-known pending or held claim status when refresh fails. An imported key restores identity without merging another key's history; accounts not present in older backups can be tracked again on X. Live X GraphQL numeric-ID extraction and end-to-end rewards, disputes, fees and chain finality still require isolated browser/backend verification.

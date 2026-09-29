@@ -3,7 +3,7 @@ import { cpSync, mkdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
-const downloads = resolve(root, "../frontend/public/downloads");
+const downloads = resolve(root, "../x-ext-frontend/public/downloads");
 const manifest = JSON.parse(readFileSync(resolve(root, "dist/chrome/manifest.json"), "utf8"));
 
 mkdirSync(downloads, { recursive: true });

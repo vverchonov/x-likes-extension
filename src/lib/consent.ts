@@ -1,4 +1,4 @@
-export const DISCLAIMER_ACCEPTED_KEY = "disclaimerAccepted";
+export const DISCLAIMER_ACCEPTED_KEY = "disclaimerAcceptedV2";
 export const CAPTURE_CONSENT_ATTR = "data-likes-capture";
 
 export async function isDisclaimerAccepted(): Promise<boolean> {

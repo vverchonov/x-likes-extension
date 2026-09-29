@@ -140,6 +140,16 @@ export function usernameFromAccountText(text: string): string | null {
   return usernameFromSegment(match?.[1]);
 }
 
+export function xUserIdFromTwidCookie(cookies: string): string | null {
+  const twid = cookies.split(";").map((entry) => entry.trim()).find((entry) => entry.startsWith("twid="));
+  if (!twid) return null;
+  try {
+    return /^u=([1-9][0-9]{0,19})$/.exec(decodeURIComponent(twid.slice(5)))?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function usernameFromSegment(segment: string | undefined): string | null {
   if (!segment || !HANDLE.test(segment) || RESERVED_PATHS.has(segment.toLowerCase())) return null;
   return segment;
@@ -204,6 +214,36 @@ export function collectTweets(value: unknown): CachedTweet[] {
 
   visit(value);
   return tweets;
+}
+
+export function collectAccountIds(value: unknown): { username: string; xUserId: string }[] {
+  const accounts: { username: string; xUserId: string }[] = [];
+  const seen = new Set<object>();
+  const stack: unknown[] = [value];
+  while (stack.length && seen.size < 10_000 && accounts.length < 100) {
+    const node = stack.pop();
+    if (!node || typeof node !== "object" || seen.has(node)) continue;
+    seen.add(node);
+    if (Array.isArray(node)) {
+      for (let i = 0; i < Math.min(node.length, 10_000 - seen.size); i++) stack.push(node[i]);
+      continue;
+    }
+    const record = node as Record<string, unknown>;
+    const legacy = asRecord(record.legacy);
+    const core = asRecord(record.core);
+    const id = typeof record.rest_id === "string" ? record.rest_id : record.id_str;
+    const username = core?.screen_name ?? legacy?.screen_name ?? record.screen_name;
+    const userRecord = record.__typename === "User" ||
+      (typeof record.rest_id === "string" && typeof core?.screen_name === "string") ||
+      (typeof record.rest_id === "string" && typeof legacy?.screen_name === "string") ||
+      (typeof record.id_str === "string" && typeof record.screen_name === "string");
+    if (typeof id === "string" && /^[1-9][0-9]{0,19}$/.test(id) &&
+        typeof username === "string" && HANDLE.test(username) && userRecord) {
+      accounts.push({ username, xUserId: id });
+    }
+    stack.push(...Object.values(record));
+  }
+  return accounts;
 }
 
 export function rememberTweets(cache: Map<string, CachedTweet>, tweets: CachedTweet[]): void {

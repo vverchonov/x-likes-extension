@@ -1,4 +1,5 @@
 import { CAPTURE_CONSENT_ATTR, DISCLAIMER_ACCEPTED_KEY, isDisclaimerAccepted } from "./lib/consent.ts";
+import { isCaptureEnabled } from "./lib/capture.ts";
 import { findArticleByStatusId, observeArticle, rootPostOnStatusPage, type DomObservation } from "./lib/dom.ts";
 import {
   decideDomCapture,
@@ -6,14 +7,16 @@ import {
   postUrl,
   profileImageUrl,
   profileImageUrlFromStyle,
-  statusIdFromHref,
   usernameFromAccountText,
   usernameFromProfileHref,
+  xUserIdFromTwidCookie,
 } from "./lib/extract.ts";
 import type { CachedTweet, EngagementKind, LikedPostPayload, MediaItem } from "./lib/types.ts";
 import { PAGE_MESSAGE_SOURCE } from "./lib/types.ts";
 
 const recentArticles = new Map<string, DomObservation>();
+const accountIds = new Map<string, string>();
+const pendingEngagements: { engagement: PageEngagement; username: string; avatarUrl: string | null }[] = [];
 
 let watching = false;
 
@@ -24,6 +27,7 @@ async function boot(): Promise<void> {
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== "local") return;
     if (changes[DISCLAIMER_ACCEPTED_KEY]?.newValue === true) startWatching();
+    if (changes.captureEnabled?.newValue === false) pendingEngagements.length = 0;
   });
 }
 
@@ -48,15 +52,30 @@ function onPostActionClick(event: Event): void {
 
 function onPageMessage(event: MessageEvent): void {
   if (event.origin !== window.location.origin || event.source !== window) return;
+  const account = pageAccountId(event.data);
+  if (account) {
+    accountIds.set(account.username.toLowerCase(), account.xUserId);
+    const current = currentAccount();
+    if (current?.username.toLowerCase() === account.username.toLowerCase()) {
+      for (let i = 0; i < pendingEngagements.length;) {
+        const pending = pendingEngagements[i];
+        if (pending.username.toLowerCase() !== account.username.toLowerCase()) { i++; continue; }
+        pendingEngagements.splice(i, 1);
+        void sendEngagedPost(pending.engagement, { username: pending.username, avatarUrl: pending.avatarUrl, xUserId: account.xUserId })
+          .catch((error) => console.error("Observation capture failed", error));
+      }
+    }
+    return;
+  }
   const engagement = pageEngagement(event.data);
   if (!engagement) return;
-  void onEngagement(engagement);
+  void onEngagement(engagement).catch((error) => console.error("Observation capture failed", error));
 }
 
 function onRuntimeMessage(message: unknown, _sender: chrome.runtime.MessageSender, sendResponse: (response: unknown) => void): void {
   if (!isUsernameRequest(message)) return;
   const account = currentAccount();
-  sendResponse({ username: account?.username ?? null });
+  sendResponse({ username: account?.username ?? null, xUserId: account?.xUserId ?? null });
 }
 
 async function onEngagement(engagement: PageEngagement): Promise<void> {
@@ -64,14 +83,24 @@ async function onEngagement(engagement: PageEngagement): Promise<void> {
 
   const account = currentAccount();
   if (!account) return;
+  if (!account.xUserId) {
+    if (!(await isCaptureEnabled())) return;
+    const resolved = currentAccount();
+    if (resolved?.username.toLowerCase() === account.username.toLowerCase() && resolved.xUserId) {
+      await sendEngagedPost(engagement, { username: account.username, avatarUrl: account.avatarUrl, xUserId: resolved.xUserId });
+      return;
+    }
+    if (pendingEngagements.length === 50) pendingEngagements.shift();
+    pendingEngagements.push({ engagement, username: account.username, avatarUrl: account.avatarUrl });
+    return;
+  }
+  const observed = { ...account, xUserId: account.xUserId };
 
   switch (engagement.kind) {
     case "like":
-      await sendLikedPost(engagement.tweetId, engagement.tweet, account);
-      return;
     case "repost":
     case "comment":
-      await sendEngagedPost(engagement, account);
+      await sendEngagedPost(engagement, observed);
       return;
     default: {
       const unreachable: never = engagement.kind;
@@ -80,30 +109,13 @@ async function onEngagement(engagement: PageEngagement): Promise<void> {
   }
 }
 
-async function sendLikedPost(
-  tweetId: string,
-  tweetValue: unknown,
-  account: { username: string; avatarUrl: string | null },
-): Promise<void> {
-  const tweet = readCachedTweet(tweetValue);
-  if (tweet && tweet.postId === tweetId) {
-    if (tweet.isReply) return;
-    await sendPayload(payloadFromCached(tweet, new Date().toISOString(), account.username, account.avatarUrl));
-    return;
-  }
-
-  const observation = observationFor(tweetId);
-  if (!observation) return;
-  await sendObservation(observation, account, statusIdFromHref(location.pathname));
-}
-
 async function sendEngagedPost(
   engagement: PageEngagement,
-  account: { username: string; avatarUrl: string | null },
+  account: { username: string; avatarUrl: string | null; xUserId: string },
 ): Promise<void> {
   const tweet = readCachedTweet(engagement.tweet);
   if (tweet && tweet.postId === engagement.tweetId && !tweet.isReply) {
-    await sendPayload(payloadFromCached(tweet, new Date().toISOString(), account.username, account.avatarUrl));
+    await sendPayload(payloadFromCached(tweet, new Date().toISOString(), account.username, account.avatarUrl), account.xUserId);
     return;
   }
 
@@ -125,12 +137,12 @@ async function sendEngagedPost(
     media: [],
     url: postUrl(engagement.tweetId),
     likedAt: new Date().toISOString(),
-  });
+  }, account.xUserId);
 }
 
 async function sendObservation(
   observation: DomObservation,
-  account: { username: string; avatarUrl: string | null },
+  account: { username: string; avatarUrl: string | null; xUserId: string },
   pageStatusId: string | null,
 ): Promise<boolean> {
   const decision = decideDomCapture({
@@ -151,7 +163,7 @@ async function sendObservation(
         media: observation.media,
         url: postUrl(decision.postId),
         likedAt: new Date().toISOString(),
-      });
+      }, account.xUserId);
       return true;
     default: {
       const unreachable: never = decision;
@@ -166,8 +178,8 @@ function observationFor(postId: string): DomObservation | null {
   return recentArticles.get(postId) ?? null;
 }
 
-async function sendPayload(payload: LikedPostPayload): Promise<void> {
-  await chrome.runtime.sendMessage({ type: "liked-post", payload });
+async function sendPayload(payload: LikedPostPayload, xUserId: string): Promise<void> {
+  await chrome.runtime.sendMessage({ type: "liked-post", payload: { ...payload, xUserId } });
 }
 
 function isUsernameRequest(message: unknown): boolean {
@@ -177,10 +189,12 @@ function isUsernameRequest(message: unknown): boolean {
 function watchSignedInAccount(): void {
   let reported = "";
   const report = () => {
-    const username = currentAccount()?.username;
-    if (!username || username.toLowerCase() === reported) return;
-    reported = username.toLowerCase();
-    chrome.runtime.sendMessage({ type: "seen-account", username }, () => {
+    const account = currentAccount();
+    if (!account?.xUserId) return;
+    const key = `${account.xUserId}:${account.username}`;
+    if (key === reported) return;
+    reported = key;
+    chrome.runtime.sendMessage({ type: "seen-account", username: account.username, xUserId: account.xUserId }, () => {
       void chrome.runtime.lastError;
     });
   };
@@ -188,7 +202,7 @@ function watchSignedInAccount(): void {
   window.setInterval(report, 1000);
 }
 
-function currentAccount(): { username: string; avatarUrl: string | null } | null {
+function currentAccount(): { username: string; avatarUrl: string | null; xUserId: string | null } | null {
   const profile = document.querySelector('a[data-testid="AppTabBar_Profile_Link"]');
   const switcher = document.querySelector('[data-testid="SideNav_AccountSwitcher_Button"]');
   const fromProfile = profile instanceof HTMLAnchorElement ? usernameFromProfileHref(profile.href) : null;
@@ -196,8 +210,18 @@ function currentAccount(): { username: string; avatarUrl: string | null } | null
   if (!username) return null;
   return {
     username,
+    xUserId: xUserIdFromTwidCookie(document.cookie) ?? accountIds.get(username.toLowerCase()) ?? null,
     avatarUrl: avatarWithin(switcher) ?? avatarWithin(profile),
   };
+}
+
+function pageAccountId(value: unknown): { username: string; xUserId: string } | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  if (record.source !== PAGE_MESSAGE_SOURCE || record.type !== "account-id" ||
+      typeof record.username !== "string" || !/^[A-Za-z0-9_]{1,15}$/.test(record.username) ||
+      typeof record.xUserId !== "string" || !/^[1-9][0-9]{0,19}$/.test(record.xUserId)) return null;
+  return { username: record.username, xUserId: record.xUserId };
 }
 
 function avatarWithin(root: Element | null): string | null {

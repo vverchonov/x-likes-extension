@@ -1,13 +1,20 @@
 import * as esbuild from "esbuild";
-import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
 const env = loadEnv(resolve(root, ".env"));
+for (const key of ["BE_ENDPOINT", "X_PROFILE_URL", "WEBSITE_URL"]) {
+  if (process.env[key] !== undefined) env[key] = process.env[key];
+}
 const beEndpoint = requireHttpUrl(env, "BE_ENDPOINT");
 const xProfileUrl = requireHttpUrl(env, "X_PROFILE_URL");
 const websiteUrl = requireHttpUrl(env, "WEBSITE_URL");
-const beOrigin = new URL(beEndpoint).origin;
+const backendUrl = new URL(beEndpoint);
+if (backendUrl.protocol === "http:" && !["localhost", "127.0.0.1", "[::1]"].includes(backendUrl.hostname)) {
+  throw new Error("BE_ENDPOINT must use HTTPS outside local development");
+}
+const beOrigin = backendUrl.origin;
 
 const define = {
   __BE_ENDPOINT__: JSON.stringify(beEndpoint),
@@ -27,7 +34,7 @@ const manifest = {
   name: "ScrollX",
   short_name: "ScrollX",
   version: "0.1.0",
-  description: "Shows the posts you liked on X and lets you claim earnings from the coins they created.",
+  description: "Shows posts you engaged with on X and lets you claim SOL rewards from their coins.",
   homepage_url: new URL(websiteUrl).origin + "/",
   action: {
     default_popup: "popup.html",
@@ -96,7 +103,7 @@ function iconPaths() {
 
 function requireHttpUrl(values, key) {
   const value = values[key];
-  if (!value) throw new Error(`Missing ${key} in extension/.env`);
+  if (!value) throw new Error(`Missing ${key} (set it in .env or the build environment)`);
   let url;
   try {
     url = new URL(value);
@@ -111,6 +118,7 @@ function requireHttpUrl(values, key) {
 
 function loadEnv(path) {
   const values = {};
+  if (!existsSync(path)) return values;
   const text = readFileSync(path, "utf8");
   for (const line of text.split("\n")) {
     const trimmed = line.trim();

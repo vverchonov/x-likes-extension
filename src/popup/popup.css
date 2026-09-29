@@ -31,6 +31,7 @@ body {
 body.is-locked .header,
 body.is-locked .home,
 body.is-locked .accounts,
+body.is-locked .settings,
 body.is-locked .processing,
 body.is-locked .claim,
 body.is-locked .confirm,
@@ -182,6 +183,11 @@ body:not(.is-locked) .disclaimer {
   background: #1a8cd8;
 }
 
+.payout-button:disabled {
+  background: var(--switch-off);
+  cursor: default;
+}
+
 .payout-minimum {
   margin: 0;
   color: var(--muted);
@@ -190,8 +196,18 @@ body:not(.is-locked) .disclaimer {
   text-align: right;
 }
 
+#latest-claim {
+  padding: 4px 16px;
+  overflow-wrap: anywhere;
+}
+
+#latest-claim:empty {
+  display: none;
+}
+
 .home,
 .accounts,
+.settings,
 .claim,
 .processing {
   display: flex;
@@ -202,6 +218,7 @@ body:not(.is-locked) .disclaimer {
 
 .home[hidden],
 .accounts[hidden],
+.settings[hidden],
 .claim[hidden],
 .processing[hidden],
 .footer[hidden] {
@@ -222,6 +239,187 @@ body:not(.is-locked) .disclaimer {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+}
+
+.settings {
+  overflow-y: auto;
+  gap: 20px;
+  padding: 20px 16px 24px;
+}
+
+.settings-heading h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.settings-heading p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.settings-group h2 {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.settings-card {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: #101113;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 14px;
+}
+
+.settings-row > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings .hint {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.settings-link {
+  flex: 0 0 auto;
+  border: 0;
+  padding: 8px 0;
+  background: transparent;
+  color: var(--primary);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+#capture-toggle {
+  flex: 0 0 auto;
+  width: 44px;
+  height: 26px;
+  padding: 3px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--switch-off);
+  cursor: pointer;
+}
+
+#capture-toggle[aria-checked="true"] {
+  background: var(--primary);
+}
+
+#capture-toggle .knob {
+  display: block;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #ffffff;
+  transition: transform 150ms ease;
+}
+
+#capture-toggle[aria-checked="true"] .knob {
+  transform: translateX(18px);
+}
+
+.identity-key {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 14px;
+  border-top: 1px solid var(--border);
+}
+
+.identity-key[hidden],
+.identity-key textarea[hidden],
+.identity-key button[hidden] {
+  display: none;
+}
+
+.identity-key label {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.identity-key textarea {
+  width: 100%;
+  height: 88px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #000000;
+  color: var(--foreground);
+  font: 12px/18px monospace;
+  overflow-wrap: anywhere;
+  resize: none;
+}
+
+#identity-backup-string {
+  height: 104px;
+}
+
+.identity-key textarea:focus {
+  border-color: var(--primary);
+  outline: none;
+}
+
+.settings-action {
+  width: 100%;
+  min-height: 40px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--primary);
+  color: #ffffff;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.settings-action:disabled {
+  background: var(--switch-off);
+  cursor: default;
+}
+
+#identity-status {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.public-identity {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.public-identity summary {
+  color: var(--primary);
+  cursor: pointer;
+}
+
+.public-identity code {
+  display: block;
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--foreground);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  user-select: all;
 }
 
 .account-row {
@@ -335,6 +533,46 @@ body:not(.is-locked) .disclaimer {
 
 #confirm-remove-button {
   background: #f4212e;
+  color: #ffffff;
+}
+
+.confirm-dialog {
+  width: calc(100% - 32px);
+  max-width: 328px;
+  max-height: calc(100% - 32px);
+  padding: 20px 16px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: #16181c;
+  color: var(--foreground);
+  font: inherit;
+}
+
+.confirm-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.76);
+}
+
+.confirm-dialog h2 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 24px;
+}
+
+.confirm-dialog p {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.confirm-dialog .confirm-actions button:first-child {
+  background: #2f3336;
+  color: var(--foreground);
+}
+
+.confirm-dialog .confirm-actions button:last-child {
+  background: var(--primary);
   color: #ffffff;
 }
 
@@ -489,6 +727,13 @@ body:not(.is-locked) .disclaimer {
   font-weight: 700;
 }
 
+.hint {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 16px;
+}
+
 .icon-button {
   display: flex;
   align-items: center;
@@ -630,4 +875,3 @@ time {
 .meta a:hover {
   text-decoration: underline;
 }
-
