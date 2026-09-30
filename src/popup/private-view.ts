@@ -404,6 +404,7 @@ function paintFeedMore(root: HTMLElement): void {
 function activityStatus(status: EventRow["processingStatus"]): string | null {
   switch (status) {
     case "finalized": return null;
+    case "already_claimed": return "Someone already submitted this post for a coin.";
     case "rejected": return "This post wasn't selected for a coin.";
     case "failed": return "We couldn't create a coin for this post.";
     case "deferred": return "Recorded; waiting for launch capacity.";
