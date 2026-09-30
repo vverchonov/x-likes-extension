@@ -520,6 +520,10 @@ async function loadMoreClaims(): Promise<void> {
   }
 }
 
+function isTransactionSignature(value: string): boolean {
+  return /^[1-9A-HJ-NP-Za-km-z]{87,88}$/.test(value);
+}
+
 function paintClaimMore(): void {
   const more = document.querySelector("#activity-more");
   if (!(more instanceof HTMLButtonElement)) return;
@@ -573,11 +577,15 @@ function paintClaims(): void {
     address.textContent = item.destination;
     destination.append(label, address);
     card.append(date, summary, description, destination);
-    if (item.transactionSignature) {
-      const transaction = destination.cloneNode(true) as HTMLElement;
-      transaction.querySelector(".activity-label")!.textContent = "Transaction signature";
-      transaction.querySelector("code")!.textContent = item.transactionSignature;
-      card.append(transaction);
+    const signature = item.transactionSignature;
+    if (signature && isTransactionSignature(signature)) {
+      const link = document.createElement("a");
+      link.className = "activity-solscan";
+      link.href = `https://solscan.io/tx/${signature}`;
+      link.target = "_blank";
+      link.rel = "noreferrer";
+      link.textContent = "view on solscan";
+      card.append(link);
     }
     root.append(card);
   }

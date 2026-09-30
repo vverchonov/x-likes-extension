@@ -408,6 +408,19 @@ body:not(.is-locked) .disclaimer {
   user-select: all;
 }
 
+.activity-solscan {
+  display: inline-block;
+  margin-top: 12px;
+  color: var(--primary);
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.activity-solscan:hover {
+  text-decoration: underline;
+}
+
 .activity-body #activity-more {
   margin-top: 16px;
 }
