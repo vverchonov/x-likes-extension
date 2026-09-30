@@ -15,6 +15,9 @@ let claimLoading = false;
 let refreshId = 0;
 let activeRefreshes = 0;
 let cursor: string | null = null;
+let historyLoading = false;
+let historyError = false;
+let feedObserver: IntersectionObserver | null = null;
 let selected: Selection | null = null;
 
 export function currentSelection(): Selection | null { return selected; }
@@ -57,6 +60,10 @@ export function clearClaimHistory(): void {
   claimMessage("");
 }
 
+export function revealFeed(): void {
+  requestAnimationFrame(() => { watchFeedEnd(); });
+}
+
 export function mountPrivateView(): void {
   document.querySelector("#refresh")?.addEventListener("click", () => {
     void refreshPrivateView(true);
@@ -83,6 +90,7 @@ export async function refreshPrivateView(force: boolean, quiet = false): Promise
   if (!(timeline instanceof HTMLElement) || !(accounts instanceof HTMLElement)) return;
   activeRefreshes++;
   if (!quiet) {
+    historyError = false;
     if (refresh instanceof HTMLButtonElement) refresh.disabled = true;
     paintMessage(timeline, "Loading history…");
     paintMessage(accounts, "Loading accounts…");
@@ -241,16 +249,12 @@ function paintAccounts(accounts: TrackedAccount[], balances: Balances | null): v
     balance.textContent = amount ? availableUsd(amount.availableLamports, balances?.claimEligibility.solUsd ?? null) : "– USD";
     const quota = snapshot?.capacity?.find((entry) => entry.xUserId === account.xUserId);
     const statistics = snapshot?.statistics?.find((entry) => entry.xUserId === account.xUserId);
-    const capacity = document.createElement("p");
-    capacity.className = "account-balance";
-    capacity.textContent = quota ? `Launch attempts used: ${quota.used}/${quota.limit} this hour` : "Launch capacity unavailable";
-    const totals = document.createElement("p");
-    totals.className = "account-balance";
-    totals.textContent = statistics ? `${statistics.engagements.toLocaleString()} engagements · ${statistics.tokensCreated.toLocaleString()} coins created` : "Activity totals unavailable";
-    const rewards = document.createElement("p");
-    rewards.className = "account-balance";
-    rewards.textContent = statistics ? `Attributed rewards: ${formatSol(statistics.attributedRewardsLamports)}` : "Attributed rewards unavailable";
-    main.append(name, balance, capacity, totals, rewards);
+    const facts = document.createElement("dl");
+    facts.className = "account-facts";
+    appendAccountFact(facts, quota ? `${quota.used}/${quota.limit}` : "–", "This hour");
+    appendAccountFact(facts, statistics ? statistics.engagements.toLocaleString() : "–", "Engagements");
+    appendAccountFact(facts, statistics ? statistics.tokensCreated.toLocaleString() : "–", "Coins");
+    main.append(name, balance, facts);
     const actions = document.createElement("div");
     actions.className = "account-actions";
     const claimButton = document.createElement("button");
@@ -273,7 +277,18 @@ function paintAccounts(accounts: TrackedAccount[], balances: Balances | null): v
   root.scrollTop = scroll;
 }
 
+function appendAccountFact(list: HTMLDListElement, value: string, label: string): void {
+  const item = document.createElement("div");
+  const amount = document.createElement("dd");
+  amount.textContent = value;
+  const caption = document.createElement("dt");
+  caption.textContent = label;
+  item.append(amount, caption);
+  list.append(item);
+}
+
 function paintHistory(events: EventRow[] | null): void {
+  feedObserver?.disconnect();
   const root = document.querySelector("#timeline");
   if (!(root instanceof HTMLElement)) return;
   const scroll = root.scrollTop;
@@ -354,15 +369,36 @@ function paintHistory(events: EventRow[] | null): void {
     }
     root.append(article);
   }
-  if (cursor) {
-    const more = document.createElement("button");
-    more.type = "button";
-    more.className = "payout-button";
-    more.textContent = "Load more";
-    more.addEventListener("click", () => { void loadMore(more); });
-    root.append(more);
-  }
+  paintFeedMore(root);
   root.scrollTop = scroll;
+  watchFeedEnd();
+}
+
+function watchFeedEnd(): void {
+  feedObserver?.disconnect();
+  if (!cursor || historyLoading || historyError) return;
+  const timeline = document.querySelector("#timeline");
+  const last = timeline?.querySelector(".post:last-of-type");
+  if (!(timeline instanceof HTMLElement) || !(last instanceof HTMLElement)) return;
+  if (!feedObserver) {
+    feedObserver = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) void loadMore();
+    }, { root: timeline, threshold: 0.01 });
+  }
+  feedObserver.observe(last);
+}
+
+function paintFeedMore(root: HTMLElement): void {
+  if (!cursor || (!historyLoading && !historyError)) return;
+  const more = document.createElement("p");
+  more.className = "feed-more";
+  more.textContent = historyLoading ? "Loading…" : "Couldn't load more";
+  if (historyError) {
+    more.tabIndex = 0;
+    more.setAttribute("role", "button");
+    more.addEventListener("click", () => { void loadMore(); });
+  }
+  root.append(more);
 }
 
 function activityStatus(status: EventRow["processingStatus"]): string | null {
@@ -382,12 +418,18 @@ function activityStatus(status: EventRow["processingStatus"]): string | null {
   }
 }
 
-async function loadMore(button: HTMLButtonElement): Promise<void> {
+async function loadMore(): Promise<void> {
   const page = cursor;
-  if (!page || !snapshot) return;
+  if (!page || !snapshot || historyLoading) return;
   const requestedRefresh = refreshId;
-  button.disabled = true;
-  button.textContent = "Loading…";
+  historyLoading = true;
+  historyError = false;
+  feedObserver?.disconnect();
+  const timeline = document.querySelector("#timeline");
+  if (timeline instanceof HTMLElement && snapshot.events) {
+    timeline.querySelector(".feed-more")?.remove();
+    paintFeedMore(timeline);
+  }
   try {
     const response: unknown = await chrome.runtime.sendMessage({ type: "history-next", cursor: page });
     if (!snapshot || refreshId !== requestedRefresh || cursor !== page || !response || typeof response !== "object" || (response as { ok?: unknown }).ok !== true) throw new Error("History unavailable");
@@ -395,8 +437,22 @@ async function loadMore(button: HTMLButtonElement): Promise<void> {
     if (!snapshot.events) throw new Error("History unavailable");
     snapshot.events.push(...history.events);
     cursor = history.nextCursor;
+    snapshot.nextCursor = history.nextCursor;
+    historyLoading = false;
     paintHistory(snapshot.events);
-  } catch { if (refreshId === requestedRefresh) { button.disabled = false; button.textContent = "Retry load more"; } }
+  } catch {
+    if (refreshId === requestedRefresh && cursor === page) {
+      historyLoading = false;
+      historyError = true;
+      const root = document.querySelector("#timeline");
+      if (root instanceof HTMLElement) {
+        root.querySelector(".feed-more")?.remove();
+        paintFeedMore(root);
+      }
+    }
+  } finally {
+    if (refreshId === requestedRefresh) historyLoading = false;
+  }
 }
 
 function claimMessage(message: string): void {

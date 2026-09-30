@@ -2,7 +2,7 @@ import { X_PROFILE_URL, WEBSITE_URL } from "../config.ts";
 import { acceptDisclaimer, isDisclaimerAccepted } from "../lib/consent.ts";
 import { formatSol } from "../lib/private-data.ts";
 import { isSolanaAddress } from "../lib/solana.ts";
-import { allAccountsSelection, clearClaimHistory, currentSelection, mountPrivateView, refreshClaimHistory, refreshClaimStatus, refreshPrivateView, rowSelection, selectClaim, setClaim } from "./private-view.ts";
+import { allAccountsSelection, clearClaimHistory, currentSelection, mountPrivateView, refreshClaimHistory, refreshClaimStatus, refreshPrivateView, revealFeed, rowSelection, selectClaim, setClaim } from "./private-view.ts";
 
 const toggle = document.querySelector("#capture-toggle");
 const settings = document.querySelector("#settings");
@@ -326,6 +326,7 @@ if (
       if (identityImportButton instanceof HTMLButtonElement) identityImportButton.disabled = true;
     }
     homeView.hidden = screen !== "feed";
+    if (screen === "feed") revealFeed();
     accountsView.hidden = screen !== "home";
     activityView.hidden = screen !== "activity";
     settingsView.hidden = screen !== "settings";

@@ -216,8 +216,11 @@ function idsFor(accounts: TrackedAccount[]): string[] {
   return accounts.map((account) => account.xUserId).sort();
 }
 
-function query(ids: string[], cursor?: string): string {
-  const params = new URLSearchParams({ xUserIds: ids.join(","), limit: "50" });
+const FEED_PAGE = "10";
+const FEED_MORE = "20";
+
+function query(ids: string[], cursor?: string, limit = FEED_PAGE): string {
+  const params = new URLSearchParams({ xUserIds: ids.join(","), limit });
   if (cursor) params.set("cursor", cursor);
   return params.toString();
 }
@@ -262,7 +265,7 @@ async function nextHistory(value: unknown, xUserId?: unknown): Promise<{ ok: tru
   const accounts = await readAccounts();
   if (!accounts.length) return { ok: false };
   if (xUserId !== undefined && (!isXUserId(xUserId) || !accounts.some((account) => account.xUserId === xUserId))) return { ok: false };
-  const response = await privateRequest("GET", `/v1/events?${query(xUserId ? [xUserId] : idsFor(accounts), value)}`);
+  const response = await privateRequest("GET", `/v1/events?${query(xUserId ? [xUserId] : idsFor(accounts), value, FEED_MORE)}`);
   if (!response.ok || publicKey !== await applicationPublicKey()) return { ok: false };
   return { ok: true, ...parseEvents(await response.json()) };
 }
