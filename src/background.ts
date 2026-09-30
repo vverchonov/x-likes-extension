@@ -4,7 +4,7 @@ import { httpsUrl } from "./lib/extract.ts";
 import { forgetSession, privateRequest } from "./lib/api.ts";
 import { applicationPublicKey, exportBackup, importBackup } from "./lib/identity.ts";
 import { isLikedUsername } from "./lib/accounts.ts";
-import { type Balances, type Claim, type ClaimHistory, type EventRow, type TrackedAccount, isXUserId, parseBalances, parseClaim, parseClaimHistory, parseEvents, trackedAccounts, validIds } from "./lib/private-data.ts";
+import { type AccountStatistics, type Balances, type Claim, type ClaimHistory, type EventRow, type LaunchCapacity, type TrackedAccount, isXUserId, parseAccountStatistics, parseBalances, parseClaim, parseClaimHistory, parseEvents, parseLaunchCapacity, trackedAccounts, validIds } from "./lib/private-data.ts";
 import { isSolanaAddress } from "./lib/solana.ts";
 import type { LikedPostPayload, MediaItem } from "./lib/types.ts";
 
@@ -15,7 +15,7 @@ const CLAIM_ATTEMPT_KEY = "claimAttemptV1";
 const PENDING_PREFIX = "pendingObservation:";
 const CACHE_MS = 60_000;
 type SignedObservation = LikedPostPayload & { xUserId: string };
-type Snapshot = { publicKey: string; accounts: TrackedAccount[]; historyIds: string[]; events: EventRow[] | null; nextCursor: string | null; balances: Balances | null; fetchedAt: number };
+type Snapshot = { publicKey: string; accounts: TrackedAccount[]; historyIds: string[]; events: EventRow[] | null; nextCursor: string | null; balances: Balances | null; capacity: LaunchCapacity[] | null; statistics: AccountStatistics[] | null; fetchedAt: number };
 let claimInFlight: Promise<unknown> = Promise.resolve();
 let accountUpdates: Promise<unknown> = Promise.resolve();
 let observationUpdates: Promise<unknown> = Promise.resolve();
@@ -235,18 +235,20 @@ async function loadData(force: boolean, xUserId?: string): Promise<{ ok: true; d
   if (!force && cached && cached.publicKey === publicKey && Date.now() - cached.fetchedAt < CACHE_MS && JSON.stringify(ids) === JSON.stringify(idsFor(trackedAccounts(cached.accounts))) && JSON.stringify(historyIds) === JSON.stringify(cached.historyIds)) {
     try {
       if (publicKey !== await applicationPublicKey()) throw new Error("Identity changed during history read");
-      return { ok: true, data: { ...cached, accounts, ...(cached.events === null ? {} : parseEvents({ events: cached.events, nextCursor: cached.nextCursor })), balances: cached.balances === null ? null : parseBalances(cached.balances) } };
+      return { ok: true, data: { ...cached, accounts, ...(cached.events === null ? {} : parseEvents({ events: cached.events, nextCursor: cached.nextCursor })), balances: cached.balances === null ? null : parseBalances(cached.balances), capacity: cached.capacity == null ? null : parseLaunchCapacity({ accounts: cached.capacity }), statistics: cached.statistics == null ? null : parseAccountStatistics({ accounts: cached.statistics }) } };
     } catch { /* Fetch fresh data. */ }
   }
   try {
     const target = query(historyIds);
-    const [history, balances] = await Promise.all([
+    const [history, balances, capacity, statistics] = await Promise.all([
       privateRequest("GET", `/v1/events?${target}`).then(async (response) => response.ok ? parseEvents(await response.json()) : null).catch(() => null),
       privateRequest("GET", `/v1/rewards/balances?xUserIds=${ids.join(",")}`).then(async (response) => response.ok ? parseBalances(await response.json()) : null).catch(() => null),
+      privateRequest("GET", `/v1/events/capacity?xUserIds=${ids.join(",")}`).then(async (response) => response.ok ? parseLaunchCapacity(await response.json()) : null).catch(() => null),
+      privateRequest("GET", `/v1/events/statistics?xUserIds=${ids.join(",")}`).then(async (response) => response.ok ? parseAccountStatistics(await response.json()) : null).catch(() => null),
     ]);
     if (publicKey !== await applicationPublicKey()) throw new Error("Identity changed during history read");
-    const data = { publicKey, accounts, historyIds, events: history?.events ?? null, nextCursor: history?.nextCursor ?? null, balances, fetchedAt: Date.now() };
-    if (history && balances) await chrome.storage.local.set({ [CACHE_KEY]: data });
+    const data = { publicKey, accounts, historyIds, events: history?.events ?? null, nextCursor: history?.nextCursor ?? null, balances, capacity, statistics, fetchedAt: Date.now() };
+    if (history && balances && capacity && statistics) await chrome.storage.local.set({ [CACHE_KEY]: data });
     return { ok: true, data };
   } catch (error) {
     console.error("Private data request failed", error);

@@ -4,6 +4,8 @@ import { isSolanaAddress } from "./solana.ts";
 import type { LikedPostPayload } from "./types.ts";
 
 export type TrackedAccount = { xUserId: string; username: string };
+export type LaunchCapacity = { xUserId: string; used: number; limit: number };
+export type AccountStatistics = { xUserId: string; engagements: number; tokensCreated: number; attributedRewardsLamports: string };
 export type ProcessingStatus = "pending" | "deferred" | "grounding" | "filtering" | "rejected" | "generating" | "ready" | "sending" | "unresolved" | "finalized" | "failed";
 export type EventRow = LikedPostPayload & { id: string; xUserId: string; intentId: string; receivedAt: string; status: "received"; processingStatus: ProcessingStatus; tokenUrl: string | null; creatorEarningsLamports: string | null };
 export type Balance = { xUserId: string; availableLamports: string; pendingLamports: string; claimedLamports: string; paused: boolean };
@@ -29,6 +31,24 @@ export function trackedAccounts(value: unknown): TrackedAccount[] {
 
 export function validIds(value: unknown): string[] {
   return Array.isArray(value) && value.length <= 100 && value.every(isXUserId) && new Set(value).size === value.length ? value : [];
+}
+
+export function parseLaunchCapacity(value: unknown): LaunchCapacity[] {
+  if (!value || typeof value !== "object" || !Array.isArray((value as { accounts?: unknown }).accounts)) throw new Error("Invalid launch capacity");
+  return (value as { accounts: unknown[] }).accounts.map((entry) => {
+    const row = entry as Partial<LaunchCapacity> | null;
+    if (!row || !isXUserId(row.xUserId) || !Number.isSafeInteger(row.used) || row.used! < 0 || !Number.isSafeInteger(row.limit) || row.limit! < 1) throw new Error("Invalid launch capacity");
+    return { xUserId: row.xUserId, used: row.used!, limit: row.limit! };
+  });
+}
+
+export function parseAccountStatistics(value: unknown): AccountStatistics[] {
+  if (!value || typeof value !== "object" || !Array.isArray((value as { accounts?: unknown }).accounts)) throw new Error("Invalid account statistics");
+  return (value as { accounts: unknown[] }).accounts.map((entry) => {
+    const row = entry as Partial<AccountStatistics> | null;
+    if (!row || !isXUserId(row.xUserId) || !Number.isSafeInteger(row.engagements) || row.engagements! < 0 || !Number.isSafeInteger(row.tokensCreated) || row.tokensCreated! < 0 || !lamports(row.attributedRewardsLamports)) throw new Error("Invalid account statistics");
+    return { xUserId: row.xUserId, engagements: row.engagements!, tokensCreated: row.tokensCreated!, attributedRewardsLamports: row.attributedRewardsLamports };
+  });
 }
 
 export function parseEvents(value: unknown): { events: EventRow[]; nextCursor: string | null } {

@@ -1,10 +1,10 @@
 import { WEBSITE_URL } from "../config.ts";
 import { isLikedUsername } from "../lib/accounts.ts";
 import { stripTrailingMediaLinks } from "../lib/extract.ts";
-import { type Balances, type Claim, type ClaimHistory, type EventRow, type TrackedAccount, formatSol, formatUsd, parseBalances, parseClaim, parseClaimHistory, parseEvents, trackedAccounts } from "../lib/private-data.ts";
+import { type AccountStatistics, type Balances, type Claim, type ClaimHistory, type EventRow, type LaunchCapacity, type TrackedAccount, formatSol, formatUsd, parseAccountStatistics, parseBalances, parseClaim, parseClaimHistory, parseEvents, parseLaunchCapacity, trackedAccounts } from "../lib/private-data.ts";
 
 type Selection = { xUserIds: string[]; balance: string };
-type Snapshot = { accounts: TrackedAccount[]; events: EventRow[] | null; nextCursor: string | null; balances: Balances | null };
+type Snapshot = { accounts: TrackedAccount[]; events: EventRow[] | null; nextCursor: string | null; balances: Balances | null; capacity: LaunchCapacity[] | null; statistics: AccountStatistics[] | null };
 
 let snapshot: Snapshot | null = null;
 let claim: Claim | null = null;
@@ -13,6 +13,7 @@ let claimCursor: string | null = null;
 let claimRefreshId = 0;
 let claimLoading = false;
 let refreshId = 0;
+let activeRefreshes = 0;
 let cursor: string | null = null;
 let selected: Selection | null = null;
 
@@ -65,23 +66,34 @@ export function mountPrivateView(): void {
   void refreshPrivateView(true);
   void refreshClaimHistory().then(() => refreshClaimStatus());
   window.setInterval(() => { if (claim && (claim.status === "pending" || claim.status === "held")) void refreshClaimStatus(); }, 15_000);
+  window.setInterval(() => {
+    const feed = document.querySelector("#home");
+    const accounts = document.querySelector("#accounts");
+    if (!document.hidden && ((feed instanceof HTMLElement && !feed.hidden) || (accounts instanceof HTMLElement && !accounts.hidden))) void refreshPrivateView(true, true);
+  }, 30_000);
 }
 
-export async function refreshPrivateView(force: boolean): Promise<void> {
+export async function refreshPrivateView(force: boolean, quiet = false): Promise<void> {
+  if (quiet && (activeRefreshes || !snapshot)) return;
   const id = ++refreshId;
+  const oldestVisibleId = quiet ? snapshot?.events?.at(-1)?.id : undefined;
   const timeline = document.querySelector("#timeline");
   const accounts = document.querySelector("#accounts-list");
   const refresh = document.querySelector("#refresh");
   if (!(timeline instanceof HTMLElement) || !(accounts instanceof HTMLElement)) return;
-  if (refresh instanceof HTMLButtonElement) refresh.disabled = true;
-  paintMessage(timeline, "Loading history…");
-  paintMessage(accounts, "Loading accounts…");
+  activeRefreshes++;
+  if (!quiet) {
+    if (refresh instanceof HTMLButtonElement) refresh.disabled = true;
+    paintMessage(timeline, "Loading history…");
+    paintMessage(accounts, "Loading accounts…");
+  }
   try {
     const result: unknown = await chrome.runtime.sendMessage({ type: "load-private-data", force });
     if (id !== refreshId) return;
     if (!result || typeof result !== "object") throw new Error("Invalid response");
     const response = result as { ok?: unknown; reason?: unknown; data?: unknown; accounts?: unknown };
     if (response.ok !== true) {
+      if (quiet) return;
       snapshot = null;
       cursor = null;
       selected = null;
@@ -97,21 +109,38 @@ export async function refreshPrivateView(force: boolean): Promise<void> {
     if (!accountsList.length) throw new Error("Invalid accounts");
     const history = data.events === null ? null : parseEvents(data);
     const balances = data.balances === null ? null : parseBalances(data.balances);
-    snapshot = { accounts: accountsList, events: history?.events ?? null, nextCursor: history?.nextCursor ?? null, balances };
-    cursor = history?.nextCursor ?? null;
-    selected = null;
+    const capacity = data.capacity == null ? null : parseLaunchCapacity({ accounts: data.capacity });
+    const statistics = data.statistics == null ? null : parseAccountStatistics({ accounts: data.statistics });
+    if (quiet && !history && !balances && !capacity && !statistics) return;
+    if (quiet && history) {
+      while (history.nextCursor && oldestVisibleId && !history.events.some((event) => event.id === oldestVisibleId)) {
+        const page: unknown = await chrome.runtime.sendMessage({ type: "history-next", cursor: history.nextCursor });
+        if (!page || typeof page !== "object" || (page as { ok?: unknown }).ok !== true) return;
+        const next = parseEvents(page);
+        history.events.push(...next.events);
+        history.nextCursor = next.nextCursor;
+      }
+    }
+    if (id !== refreshId) return;
+    const previous = snapshot;
+    const events = history?.events ?? (quiet ? previous?.events ?? null : null);
+    snapshot = { accounts: accountsList, events, nextCursor: history?.nextCursor ?? (quiet ? previous?.nextCursor ?? null : null), balances: quiet ? balances ?? previous?.balances ?? null : balances, capacity: quiet ? capacity ?? previous?.capacity ?? null : capacity, statistics: quiet ? statistics ?? previous?.statistics ?? null : statistics };
+    cursor = snapshot.nextCursor;
+    if (!quiet) selected = null;
     paintAllAccounts();
-    paintAccounts(accountsList, balances);
-    paintHistory(history?.events ?? null);
+    paintAccounts(accountsList, snapshot.balances);
+    if (!quiet || JSON.stringify(previous?.events) !== JSON.stringify(events) || previous?.balances?.claimEligibility.solUsd !== snapshot.balances?.claimEligibility.solUsd) paintHistory(events);
   } catch {
     if (id !== refreshId) return;
+    if (quiet) return;
     snapshot = null;
     cursor = null;
     paintMessage(timeline, "Failed to load");
     paintMessage(accounts, "Couldn't load accounts or balances");
     paintAllAccounts();
   } finally {
-    if (id === refreshId && refresh instanceof HTMLButtonElement) refresh.disabled = false;
+    activeRefreshes--;
+    if (id === refreshId && !quiet && refresh instanceof HTMLButtonElement) refresh.disabled = false;
   }
 }
 
@@ -193,6 +222,7 @@ function combinedClaimLabel(balances: Balances | null): string {
 function paintAccounts(accounts: TrackedAccount[], balances: Balances | null): void {
   const root = document.querySelector("#accounts-list");
   if (!(root instanceof HTMLElement)) return;
+  const scroll = root.scrollTop;
   root.replaceChildren();
   for (const account of accounts) {
     const amount = balances?.accounts.find((entry) => entry.xUserId === account.xUserId);
@@ -209,7 +239,18 @@ function paintAccounts(accounts: TrackedAccount[], balances: Balances | null): v
     const balance = document.createElement("p");
     balance.className = "account-balance";
     balance.textContent = amount ? availableUsd(amount.availableLamports, balances?.claimEligibility.solUsd ?? null) : "– USD";
-    main.append(name, balance);
+    const quota = snapshot?.capacity?.find((entry) => entry.xUserId === account.xUserId);
+    const statistics = snapshot?.statistics?.find((entry) => entry.xUserId === account.xUserId);
+    const capacity = document.createElement("p");
+    capacity.className = "account-balance";
+    capacity.textContent = quota ? `Launch attempts used: ${quota.used}/${quota.limit} this hour` : "Launch capacity unavailable";
+    const totals = document.createElement("p");
+    totals.className = "account-balance";
+    totals.textContent = statistics ? `${statistics.engagements.toLocaleString()} engagements · ${statistics.tokensCreated.toLocaleString()} coins created` : "Activity totals unavailable";
+    const rewards = document.createElement("p");
+    rewards.className = "account-balance";
+    rewards.textContent = statistics ? `Attributed rewards: ${formatSol(statistics.attributedRewardsLamports)}` : "Attributed rewards unavailable";
+    main.append(name, balance, capacity, totals, rewards);
     const actions = document.createElement("div");
     actions.className = "account-actions";
     const claimButton = document.createElement("button");
@@ -229,11 +270,13 @@ function paintAccounts(accounts: TrackedAccount[], balances: Balances | null): v
     article.append(main, actions);
     root.append(article);
   }
+  root.scrollTop = scroll;
 }
 
 function paintHistory(events: EventRow[] | null): void {
   const root = document.querySelector("#timeline");
   if (!(root instanceof HTMLElement)) return;
+  const scroll = root.scrollTop;
   root.replaceChildren();
   if (!events?.length) {
     const empty = document.createElement("p");
@@ -278,7 +321,7 @@ function paintHistory(events: EventRow[] | null): void {
       token.href = event.tokenUrl;
       token.textContent = "view coin";
       links.append(token);
-      if (event.creatorEarningsLamports !== null && BigInt(event.creatorEarningsLamports) > 0n) {
+      if (event.creatorEarningsLamports !== null) {
         const earning = document.createElement("span");
         earning.className = "coin-earning";
         earning.textContent = `Attributed coin rewards: ${formatUsd(event.creatorEarningsLamports, snapshot?.balances?.claimEligibility.solUsd ?? null) ?? formatSol(event.creatorEarningsLamports)}`;
@@ -319,6 +362,7 @@ function paintHistory(events: EventRow[] | null): void {
     more.addEventListener("click", () => { void loadMore(more); });
     root.append(more);
   }
+  root.scrollTop = scroll;
 }
 
 function activityStatus(status: EventRow["processingStatus"]): string | null {
@@ -326,8 +370,8 @@ function activityStatus(status: EventRow["processingStatus"]): string | null {
     case "finalized": return null;
     case "rejected": return "This post wasn't selected for a coin.";
     case "failed": return "We couldn't create a coin for this post.";
+    case "deferred": return "Recorded; waiting for launch capacity.";
     case "pending":
-    case "deferred":
     case "grounding":
     case "filtering":
     case "generating":
