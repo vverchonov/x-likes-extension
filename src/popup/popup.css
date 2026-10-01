@@ -1196,6 +1196,37 @@ body:not(.is-locked) .disclaimer {
   line-height: 18px;
 }
 
+.force-create-wrap {
+  align-self: flex-start;
+  display: inline-flex;
+}
+
+.force-create-wrap[title] {
+  cursor: not-allowed;
+}
+
+.force-create {
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--primary);
+  color: #ffffff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.force-create:hover {
+  background: #1a8cd8;
+}
+
+.force-create:disabled {
+  background: var(--switch-off);
+  pointer-events: none;
+}
+
 time {
   flex: 0 0 auto;
   color: var(--muted);

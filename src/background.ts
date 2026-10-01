@@ -78,6 +78,11 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
     return true;
   }
 
+  if (message && typeof message === "object" && (message as { type?: unknown }).type === "force-create") {
+    void forceCreate((message as { eventId?: unknown }).eventId).then((response) => sendResponse(response)).catch(() => sendResponse({ ok: false, reason: "failed" }));
+    return true;
+  }
+
   if (message && typeof message === "object" && (message as { type?: unknown }).type === "history-next") {
     const page = message as { cursor?: unknown; xUserId?: unknown };
     void nextHistory(page.cursor, page.xUserId).then((response) => sendResponse(response)).catch(() => sendResponse({ ok: false }));
@@ -259,6 +264,19 @@ async function loadData(force: boolean, xUserId?: string): Promise<{ ok: true; d
     console.error("Private data request failed", error);
     return { ok: false, reason: "failed", accounts };
   }
+}
+
+async function forceCreate(eventId: unknown): Promise<{ ok: true } | { ok: false; reason: "capacity" | "conflict" | "failed" }> {
+  if (!(await isDisclaimerAccepted()) || typeof eventId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(eventId)) return { ok: false, reason: "failed" };
+  const response = await privateRequest("POST", `/v1/events/${eventId}/force`, {});
+  if (response.status === 409) {
+    const body: unknown = await response.json().catch(() => null);
+    const code = body && typeof body === "object" ? (body as { error?: { code?: unknown } }).error?.code : undefined;
+    return { ok: false, reason: code === "capacity" ? "capacity" : "conflict" };
+  }
+  if (!response.ok) return { ok: false, reason: "failed" };
+  await chrome.storage.local.remove(CACHE_KEY);
+  return { ok: true };
 }
 
 async function nextHistory(value: unknown, xUserId?: unknown): Promise<{ ok: true; events: EventRow[]; nextCursor: string | null } | { ok: false }> {

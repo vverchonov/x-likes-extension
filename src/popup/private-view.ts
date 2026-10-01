@@ -20,6 +20,8 @@ let historyLoading = false;
 let historyError = false;
 let feedObserver: IntersectionObserver | null = null;
 let selected: Selection | null = null;
+const forcing = new Set<string>();
+const forceErrors = new Map<string, string>();
 
 export function currentSelection(): Selection | null { return selected; }
 export function allAccountsSelection(): Selection | null {
@@ -370,6 +372,28 @@ function paintHistory(events: EventRow[] | null): void {
       status.textContent = statusText;
       meta.append(status);
     }
+    const quota = forceQuota(event);
+    if (quota || forcing.has(event.id)) {
+      const limitReached = quota != null && quota.used >= quota.limit && !forcing.has(event.id);
+      const wrap = document.createElement("span");
+      wrap.className = "force-create-wrap";
+      if (limitReached) wrap.title = "This hour's coin limit is reached. Try again later.";
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "force-create";
+      button.textContent = forcing.has(event.id) ? "Creating coin…" : "Create coin anyway";
+      button.disabled = forcing.has(event.id) || limitReached;
+      button.addEventListener("click", () => { void forceCreate(event.id); });
+      wrap.append(button);
+      meta.append(wrap);
+      const message = forceErrors.get(event.id);
+      if (message) {
+        const error = document.createElement("p");
+        error.className = "activity-status";
+        error.textContent = message;
+        meta.append(error);
+      }
+    }
     article.append(meta);
     if (event.avatarUrl && isLikedUsername(event.username)) {
       const profile = document.createElement("a");
@@ -417,6 +441,40 @@ function paintFeedMore(root: HTMLElement): void {
     more.addEventListener("click", () => { void loadMore(); });
   }
   root.append(more);
+}
+
+function forceQuota(event: EventRow): { used: number; limit: number } | null {
+  if (!event.canForceCreate || event.processingStatus !== "rejected" || !event.intentId) return null;
+  const quota = snapshot?.capacity?.find((entry) => entry.xUserId === event.xUserId);
+  return quota ?? null;
+}
+
+function canOfferForce(event: EventRow): boolean {
+  const quota = forceQuota(event);
+  return quota != null && quota.used < quota.limit;
+}
+
+async function forceCreate(eventId: string): Promise<void> {
+  const events = snapshot?.events;
+  if (forcing.has(eventId) || !events?.some((event) => event.id === eventId && canOfferForce(event))) return;
+  forcing.add(eventId);
+  forceErrors.delete(eventId);
+  paintHistory(events);
+  try {
+    const response: unknown = await chrome.runtime.sendMessage({ type: "force-create", eventId });
+    const result = response && typeof response === "object" ? response as { ok?: unknown; reason?: unknown } : null;
+    if (!result || result.ok !== true) {
+      const reason = result?.reason;
+      forceErrors.set(eventId, reason === "capacity" ? "This account is at its coin limit for this hour." : reason === "conflict" ? "This post can't be forced into a coin." : "Couldn't create the coin. Try again.");
+      return;
+    }
+    await refreshPrivateView(true);
+  } catch {
+    forceErrors.set(eventId, "Couldn't create the coin. Try again.");
+  } finally {
+    forcing.delete(eventId);
+    if (snapshot?.events) paintHistory(snapshot.events);
+  }
 }
 
 function activityStatus(status: EventRow["processingStatus"]): string | null {

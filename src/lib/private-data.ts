@@ -7,7 +7,7 @@ export type TrackedAccount = { xUserId: string; username: string };
 export type LaunchCapacity = { xUserId: string; used: number; limit: number };
 export type AccountStatistics = { xUserId: string; engagements: number; tokensCreated: number; attributedRewardsLamports: string };
 export type ProcessingStatus = "already_claimed" | "pending" | "deferred" | "grounding" | "filtering" | "rejected" | "generating" | "ready" | "sending" | "unresolved" | "finalized" | "failed";
-export type EventRow = LikedPostPayload & { id: string; xUserId: string; intentId: string | null; receivedAt: string; status: "received"; processingStatus: ProcessingStatus; tokenUrl: string | null; creatorEarningsLamports: string | null };
+export type EventRow = LikedPostPayload & { id: string; xUserId: string; intentId: string | null; receivedAt: string; status: "received"; processingStatus: ProcessingStatus; canForceCreate: boolean; tokenUrl: string | null; creatorEarningsLamports: string | null };
 export type Balance = { xUserId: string; availableLamports: string; pendingLamports: string; claimedLamports: string; paused: boolean };
 export type EligibilityReason = "below_minimum" | "quote_unavailable" | "quote_stale" | "disputed" | "unauthorized";
 export type Balances = { accounts: Balance[]; combined: Omit<Balance, "xUserId" | "paused">; claimEligibility: { available: boolean; reason: EligibilityReason | null; solUsd: string | null; quoteAt: string | null } };
@@ -59,14 +59,14 @@ export function parseEvents(value: unknown): { events: EventRow[]; nextCursor: s
   const rows = events.map((item) => {
     const post = parseLikedPost(item);
     const row = item as Partial<EventRow>;
-    if (!post || !isXUserId(row.xUserId) || typeof row.id !== "string" || !(typeof row.intentId === "string" || (row.intentId === null && row.processingStatus === "already_claimed")) || (row.intentId !== null && row.processingStatus === "already_claimed") || typeof row.receivedAt !== "string" || row.status !== "received" || !statuses.includes(row.processingStatus as ProcessingStatus) || !(row.tokenUrl === null || typeof row.tokenUrl === "string") || (row.processingStatus === "finalized" ? !lamports(row.creatorEarningsLamports) : row.creatorEarningsLamports !== null)) throw new Error("Invalid history row");
+    if (!post || !isXUserId(row.xUserId) || typeof row.id !== "string" || !(typeof row.intentId === "string" || (row.intentId === null && row.processingStatus === "already_claimed")) || (row.intentId !== null && row.processingStatus === "already_claimed") || typeof row.receivedAt !== "string" || row.status !== "received" || !statuses.includes(row.processingStatus as ProcessingStatus) || typeof row.canForceCreate !== "boolean" || (row.canForceCreate && (row.processingStatus !== "rejected" || typeof row.intentId !== "string")) || !(row.tokenUrl === null || typeof row.tokenUrl === "string") || (row.processingStatus === "finalized" ? !lamports(row.creatorEarningsLamports) : row.creatorEarningsLamports !== null)) throw new Error("Invalid history row");
     let tokenUrl: string | null = null;
-    if (row.processingStatus === "finalized" && row.tokenUrl) {
+    if ((row.processingStatus === "finalized" || row.processingStatus === "already_claimed") && row.tokenUrl) {
       const url = new URL(row.tokenUrl);
       if (url.protocol !== "https:") throw new Error("Invalid token URL");
       tokenUrl = url.href;
     }
-    return { ...post, id: row.id, xUserId: row.xUserId, intentId: row.intentId, receivedAt: row.receivedAt, status: "received" as const, processingStatus: row.processingStatus as ProcessingStatus, tokenUrl, creatorEarningsLamports: row.creatorEarningsLamports ?? null };
+    return { ...post, id: row.id, xUserId: row.xUserId, intentId: row.intentId, receivedAt: row.receivedAt, status: "received" as const, processingStatus: row.processingStatus as ProcessingStatus, canForceCreate: row.canForceCreate, tokenUrl, creatorEarningsLamports: row.creatorEarningsLamports ?? null };
   });
   return { events: rows, nextCursor };
 }
