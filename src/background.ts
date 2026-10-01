@@ -166,6 +166,8 @@ async function flushObservation(key: string, payload: SignedObservation, publicK
   const current = (await chrome.storage.local.get(key))[key] as { publicKey?: unknown; payload?: unknown } | undefined;
   if (current?.publicKey === publicKey && JSON.stringify(asPayload(current.payload)) === JSON.stringify(payload)) await chrome.storage.local.remove(key);
   await chrome.storage.local.remove(CACHE_KEY);
+  // The popup/side panel may already be open with an older history snapshot.
+  await chrome.runtime.sendMessage({ type: "observation-delivered" }).catch(() => undefined);
 }
 
 async function retryObservations(): Promise<void> {

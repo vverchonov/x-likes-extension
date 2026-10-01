@@ -14,6 +14,7 @@ let claimRefreshId = 0;
 let claimLoading = false;
 let refreshId = 0;
 let activeRefreshes = 0;
+let refreshPending = false;
 let cursor: string | null = null;
 let historyLoading = false;
 let historyError = false;
@@ -65,6 +66,11 @@ export function revealFeed(): void {
 }
 
 export function mountPrivateView(): void {
+  chrome.runtime.onMessage.addListener((message: unknown, sender) => {
+    if (sender.id !== chrome.runtime.id || sender.tab || !message || typeof message !== "object" ||
+        (message as { type?: unknown }).type !== "observation-delivered") return;
+    refreshAfterDelivery();
+  });
   document.querySelector("#refresh")?.addEventListener("click", () => {
     void refreshPrivateView(true);
     void refreshClaimHistory().then(() => refreshClaimStatus());
@@ -78,6 +84,14 @@ export function mountPrivateView(): void {
     const accounts = document.querySelector("#accounts");
     if (!document.hidden && ((feed instanceof HTMLElement && !feed.hidden) || (accounts instanceof HTMLElement && !accounts.hidden))) void refreshPrivateView(true, true);
   }, 30_000);
+}
+
+function refreshAfterDelivery(): void {
+  if (activeRefreshes) {
+    refreshPending = true;
+    return;
+  }
+  void refreshPrivateView(true, snapshot !== null);
 }
 
 export async function refreshPrivateView(force: boolean, quiet = false): Promise<void> {
@@ -149,6 +163,10 @@ export async function refreshPrivateView(force: boolean, quiet = false): Promise
   } finally {
     activeRefreshes--;
     if (id === refreshId && !quiet && refresh instanceof HTMLButtonElement) refresh.disabled = false;
+    if (!activeRefreshes && refreshPending) {
+      refreshPending = false;
+      refreshAfterDelivery();
+    }
   }
 }
 
