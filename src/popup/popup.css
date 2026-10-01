@@ -626,6 +626,38 @@ body:not(.is-locked) .disclaimer {
   min-width: 0;
 }
 
+.account-name {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.account-name .account-profile {
+  min-width: 0;
+}
+
+.verified-badge {
+  display: flex;
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  color: #1d9bf0;
+}
+
+.verified-badge svg {
+  width: 100%;
+  height: 100%;
+}
+
+.account-verification {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 14px;
+}
+
 .account-profile {
   display: block;
   overflow: hidden;
@@ -674,6 +706,7 @@ body:not(.is-locked) .disclaimer {
   line-height: 14px;
 }
 
+.account-verify,
 .account-claim {
   height: 26px;
   padding: 0 8px;

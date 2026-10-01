@@ -1,10 +1,11 @@
 import { WEBSITE_URL } from "../config.ts";
 import { isLikedUsername } from "../lib/accounts.ts";
 import { stripTrailingMediaLinks } from "../lib/extract.ts";
-import { type AccountStatistics, type Balances, type Claim, type ClaimHistory, type EventRow, type LaunchCapacity, type TrackedAccount, formatSol, formatUsd, parseAccountStatistics, parseBalances, parseClaim, parseClaimHistory, parseEvents, parseLaunchCapacity, trackedAccounts } from "../lib/private-data.ts";
+import { type AccountStatistics, type AccountVerification, type Balances, type Claim, type ClaimHistory, type EventRow, type LaunchCapacity, type TrackedAccount, formatSol, formatUsd, parseAccountStatistics, parseBalances, parseClaim, parseClaimHistory, parseEvents, parseLaunchCapacity, parseVerification, trackedAccounts } from "../lib/private-data.ts";
 
 type Selection = { xUserIds: string[]; balance: string };
-type Snapshot = { accounts: TrackedAccount[]; events: EventRow[] | null; nextCursor: string | null; balances: Balances | null; capacity: LaunchCapacity[] | null; statistics: AccountStatistics[] | null };
+type Snapshot = { accounts: TrackedAccount[]; events: EventRow[] | null; nextCursor: string | null; balances: Balances | null; capacity: LaunchCapacity[] | null; statistics: AccountStatistics[] | null; verification: AccountVerification[] | null };
+const verificationNotes = new Map<string, string>();
 
 let snapshot: Snapshot | null = null;
 let claim: Claim | null = null;
@@ -23,6 +24,10 @@ let selected: Selection | null = null;
 const forcing = new Set<string>();
 const forceErrors = new Map<string, string>();
 
+export function noteVerification(xUserId: string, message: string): void {
+  if (message) verificationNotes.set(xUserId, message);
+  else verificationNotes.delete(xUserId);
+}
 export function currentSelection(): Selection | null { return selected; }
 export function allAccountsSelection(): Selection | null {
   if (!snapshot?.balances || snapshot.balances.accounts.length !== snapshot.accounts.length || !snapshot.balances.claimEligibility.available || snapshot.balances.accounts.some((account) => account.paused)) return null;
@@ -135,7 +140,8 @@ export async function refreshPrivateView(force: boolean, quiet = false): Promise
     const balances = data.balances === null ? null : parseBalances(data.balances);
     const capacity = data.capacity == null ? null : parseLaunchCapacity({ accounts: data.capacity });
     const statistics = data.statistics == null ? null : parseAccountStatistics({ accounts: data.statistics });
-    if (quiet && !history && !balances && !capacity && !statistics) return;
+    const verification = data.verification == null ? null : parseVerification({ accounts: data.verification });
+    if (quiet && !history && !balances && !capacity && !statistics && !verification) return;
     if (quiet && history) {
       while (history.nextCursor && oldestVisibleId && !history.events.some((event) => event.id === oldestVisibleId)) {
         const page: unknown = await chrome.runtime.sendMessage({ type: "history-next", cursor: history.nextCursor });
@@ -148,7 +154,7 @@ export async function refreshPrivateView(force: boolean, quiet = false): Promise
     if (id !== refreshId) return;
     const previous = snapshot;
     const events = history?.events ?? (quiet ? previous?.events ?? null : null);
-    snapshot = { accounts: accountsList, events, nextCursor: history?.nextCursor ?? (quiet ? previous?.nextCursor ?? null : null), balances: quiet ? balances ?? previous?.balances ?? null : balances, capacity: quiet ? capacity ?? previous?.capacity ?? null : capacity, statistics: quiet ? statistics ?? previous?.statistics ?? null : statistics };
+    snapshot = { accounts: accountsList, events, nextCursor: history?.nextCursor ?? (quiet ? previous?.nextCursor ?? null : null), balances: quiet ? balances ?? previous?.balances ?? null : balances, capacity: quiet ? capacity ?? previous?.capacity ?? null : capacity, statistics: quiet ? statistics ?? previous?.statistics ?? null : statistics, verification: quiet ? verification ?? previous?.verification ?? null : verification };
     cursor = snapshot.nextCursor;
     if (!quiet) selected = null;
     paintAllAccounts();
@@ -258,12 +264,17 @@ function paintAccounts(accounts: TrackedAccount[], balances: Balances | null): v
     article.className = "account-row";
     const main = document.createElement("div");
     main.className = "account-main";
+    const heading = document.createElement("div");
+    heading.className = "account-name";
     const name = document.createElement("a");
     name.className = "label account-profile";
     name.href = new URL(`/creators/id/${account.xUserId}`, WEBSITE_URL).href;
     name.target = "_blank";
     name.rel = "noreferrer";
     name.textContent = `@${account.username}`;
+    const verification = snapshot?.verification?.find((entry) => entry.xUserId === account.xUserId)?.status;
+    heading.append(name);
+    if (verification === "self") heading.append(verifiedBadge());
     const balance = document.createElement("p");
     balance.className = "account-balance";
     balance.textContent = amount ? availableUsd(amount.availableLamports, balances?.claimEligibility.solUsd ?? null) : "– USD";
@@ -274,9 +285,31 @@ function paintAccounts(accounts: TrackedAccount[], balances: Balances | null): v
     appendAccountFact(facts, quota ? `${quota.used}/${quota.limit}` : "–", "This hour");
     appendAccountFact(facts, statistics ? statistics.engagements.toLocaleString() : "–", "Engagements");
     appendAccountFact(facts, statistics ? statistics.tokensCreated.toLocaleString() : "–", "Coins");
-    main.append(name, balance, facts);
+    const note = verificationNotes.get(account.xUserId);
+    const caption = note
+      ? note
+      : verification === "none"
+        ? "Not verified"
+        : verification === "other"
+          ? "Verified by another identity"
+          : verification === "self"
+            ? ""
+            : "Verification unavailable";
+    const status = document.createElement("p");
+    status.className = "account-verification";
+    status.textContent = caption;
+    main.append(heading, ...(caption ? [status] : []), balance, facts);
     const actions = document.createElement("div");
     actions.className = "account-actions";
+    if (verification === "none") {
+      const verifyButton = document.createElement("button");
+      verifyButton.className = "payout-button account-verify";
+      verifyButton.type = "button";
+      verifyButton.dataset.action = "verify";
+      verifyButton.dataset.xUserId = account.xUserId;
+      verifyButton.textContent = "Verify";
+      actions.append(verifyButton);
+    }
     const claimButton = document.createElement("button");
     claimButton.className = "payout-button account-claim";
     claimButton.type = "button";
@@ -295,6 +328,15 @@ function paintAccounts(accounts: TrackedAccount[], balances: Balances | null): v
     root.append(article);
   }
   root.scrollTop = scroll;
+}
+
+function verifiedBadge(): HTMLElement {
+  const badge = document.createElement("span");
+  badge.className = "verified-badge";
+  badge.setAttribute("role", "img");
+  badge.setAttribute("aria-label", "Verified");
+  badge.innerHTML = `<svg viewBox="0 0 22 22" aria-hidden="true"><path fill="currentColor" d="M20.396 11c-.018-.646-.215-1.275-.57-1.816-.354-.54-.852-.972-1.438-1.246.223-.607.27-1.264.14-1.897-.131-.634-.437-1.218-.882-1.687-.47-.445-1.053-.75-1.687-.882-.633-.13-1.29-.083-1.897.14-.273-.587-.704-1.086-1.245-1.44S11.647 1.62 11 1.604c-.646.017-1.273.213-1.813.568s-.969.854-1.24 1.44c-.608-.223-1.267-.272-1.902-.14-.635.13-1.22.436-1.69.882-.445.47-.749 1.055-.878 1.688-.13.633-.08 1.29.144 1.896-.587.274-1.087.705-1.443 1.245-.356.54-.555 1.17-.574 1.817.02.647.218 1.276.574 1.817.356.54.856.972 1.443 1.245-.224.606-.274 1.263-.144 1.896.13.634.433 1.218.877 1.688.47.443 1.054.747 1.687.878.633.132 1.29.084 1.897-.136.274.586.705 1.084 1.246 1.439.54.354 1.17.551 1.816.569.647-.016 1.276-.213 1.817-.567s.972-.854 1.245-1.44c.604.239 1.266.296 1.903.164.636-.132 1.22-.447 1.68-.907.46-.46.776-1.044.908-1.681s.075-1.299-.165-1.903c.586-.274 1.084-.705 1.439-1.246.354-.54.551-1.17.569-1.816zM9.662 14.85l-3.429-3.428 1.293-1.302 2.072 2.072 4.4-4.794 1.347 1.246z"></path></svg>`;
+  return badge;
 }
 
 function appendAccountFact(list: HTMLDListElement, value: string, label: string): void {

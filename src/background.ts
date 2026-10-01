@@ -4,7 +4,7 @@ import { httpsUrl } from "./lib/extract.ts";
 import { forgetSession, privateRequest } from "./lib/api.ts";
 import { applicationPublicKey, exportBackup, importBackup } from "./lib/identity.ts";
 import { isLikedUsername } from "./lib/accounts.ts";
-import { type AccountStatistics, type Balances, type Claim, type ClaimHistory, type EventRow, type LaunchCapacity, type TrackedAccount, isXUserId, parseAccountStatistics, parseBalances, parseClaim, parseClaimHistory, parseEvents, parseLaunchCapacity, trackedAccounts, validIds } from "./lib/private-data.ts";
+import { type AccountStatistics, type AccountVerification, type Balances, type Claim, type ClaimHistory, type EventRow, type LaunchCapacity, type TrackedAccount, isXUserId, parseAccountStatistics, parseBalances, parseClaim, parseClaimHistory, parseEvents, parseLaunchCapacity, parseVerification, trackedAccounts, validIds } from "./lib/private-data.ts";
 import { isSolanaAddress } from "./lib/solana.ts";
 import type { LikedPostPayload, MediaItem } from "./lib/types.ts";
 
@@ -15,7 +15,7 @@ const CLAIM_ATTEMPT_KEY = "claimAttemptV1";
 const PENDING_PREFIX = "pendingObservation:";
 const CACHE_MS = 60_000;
 type SignedObservation = LikedPostPayload & { xUserId: string };
-type Snapshot = { publicKey: string; accounts: TrackedAccount[]; historyIds: string[]; events: EventRow[] | null; nextCursor: string | null; balances: Balances | null; capacity: LaunchCapacity[] | null; statistics: AccountStatistics[] | null; fetchedAt: number };
+type Snapshot = { publicKey: string; accounts: TrackedAccount[]; historyIds: string[]; events: EventRow[] | null; nextCursor: string | null; balances: Balances | null; capacity: LaunchCapacity[] | null; statistics: AccountStatistics[] | null; verification: AccountVerification[] | null; fetchedAt: number };
 let claimInFlight: Promise<unknown> = Promise.resolve();
 let accountUpdates: Promise<unknown> = Promise.resolve();
 let observationUpdates: Promise<unknown> = Promise.resolve();
@@ -96,6 +96,11 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
 
   if (message && typeof message === "object" && (message as { type?: unknown }).type === "claim-history") {
     void claimHistory((message as { cursor?: unknown }).cursor).then((response) => sendResponse(response)).catch(() => sendResponse({ ok: false }));
+    return true;
+  }
+
+  if (message && typeof message === "object" && (message as { type?: unknown }).type === "verify-account") {
+    void verifyAccount((message as { xUserId?: unknown }).xUserId).then((response) => sendResponse(response)).catch(() => sendResponse({ ok: false, reason: "Verification failed" }));
     return true;
   }
 
@@ -242,23 +247,24 @@ async function loadData(force: boolean, xUserId?: string): Promise<{ ok: true; d
   const publicKey = await applicationPublicKey();
   const stored = await chrome.storage.local.get(CACHE_KEY);
   const cached = stored[CACHE_KEY] as Snapshot | undefined;
-  if (!force && cached && cached.publicKey === publicKey && Date.now() - cached.fetchedAt < CACHE_MS && JSON.stringify(ids) === JSON.stringify(idsFor(trackedAccounts(cached.accounts))) && JSON.stringify(historyIds) === JSON.stringify(cached.historyIds)) {
+  if (!force && cached && cached.publicKey === publicKey && Date.now() - cached.fetchedAt < CACHE_MS && Array.isArray(cached.verification) && JSON.stringify(ids) === JSON.stringify(idsFor(trackedAccounts(cached.accounts))) && JSON.stringify(historyIds) === JSON.stringify(cached.historyIds)) {
     try {
       if (publicKey !== await applicationPublicKey()) throw new Error("Identity changed during history read");
-      return { ok: true, data: { ...cached, accounts, ...(cached.events === null ? {} : parseEvents({ events: cached.events, nextCursor: cached.nextCursor })), balances: cached.balances === null ? null : parseBalances(cached.balances), capacity: cached.capacity == null ? null : parseLaunchCapacity({ accounts: cached.capacity }), statistics: cached.statistics == null ? null : parseAccountStatistics({ accounts: cached.statistics }) } };
+      return { ok: true, data: { ...cached, accounts, ...(cached.events === null ? {} : parseEvents({ events: cached.events, nextCursor: cached.nextCursor })), balances: cached.balances === null ? null : parseBalances(cached.balances), capacity: cached.capacity == null ? null : parseLaunchCapacity({ accounts: cached.capacity }), statistics: cached.statistics == null ? null : parseAccountStatistics({ accounts: cached.statistics }), verification: parseVerification({ accounts: cached.verification }) } };
     } catch { /* Fetch fresh data. */ }
   }
   try {
     const target = query(historyIds);
-    const [history, balances, capacity, statistics] = await Promise.all([
+    const [history, balances, capacity, statistics, verification] = await Promise.all([
       privateRequest("GET", `/v1/events?${target}`).then(async (response) => response.ok ? parseEvents(await response.json()) : null).catch(() => null),
       privateRequest("GET", `/v1/rewards/balances?xUserIds=${ids.join(",")}`).then(async (response) => response.ok ? parseBalances(await response.json()) : null).catch(() => null),
       privateRequest("GET", `/v1/events/capacity?xUserIds=${ids.join(",")}`).then(async (response) => response.ok ? parseLaunchCapacity(await response.json()) : null).catch(() => null),
       privateRequest("GET", `/v1/events/statistics?xUserIds=${ids.join(",")}`).then(async (response) => response.ok ? parseAccountStatistics(await response.json()) : null).catch(() => null),
+      privateRequest("GET", `/v1/x/verification?xUserIds=${ids.join(",")}`).then(async (response) => response.ok ? parseVerification(await response.json()) : null).catch(() => null),
     ]);
     if (publicKey !== await applicationPublicKey()) throw new Error("Identity changed during history read");
-    const data = { publicKey, accounts, historyIds, events: history?.events ?? null, nextCursor: history?.nextCursor ?? null, balances, capacity, statistics, fetchedAt: Date.now() };
-    if (history && balances && capacity && statistics) await chrome.storage.local.set({ [CACHE_KEY]: data });
+    const data = { publicKey, accounts, historyIds, events: history?.events ?? null, nextCursor: history?.nextCursor ?? null, balances, capacity, statistics, verification, fetchedAt: Date.now() };
+    if (history && balances && capacity && statistics && verification) await chrome.storage.local.set({ [CACHE_KEY]: data });
     return { ok: true, data };
   } catch (error) {
     console.error("Private data request failed", error);
@@ -322,6 +328,70 @@ async function claimHistory(cursor: unknown): Promise<{ ok: true; claims: ClaimH
   const response = await privateRequest("GET", `/v1/rewards/claims?${params}`);
   if (!response.ok || publicKey !== await applicationPublicKey()) return { ok: false };
   return { ok: true, ...parseClaimHistory(await response.json()) };
+}
+
+async function verifyAccount(xUserId: unknown): Promise<{ ok: true } | { ok: false; reason: string }> {
+  if (!(await isDisclaimerAccepted()) || !isXUserId(xUserId)) return { ok: false, reason: "Verification failed" };
+  const accounts = await readAccounts();
+  if (!accounts.some((account) => account.xUserId === xUserId)) return { ok: false, reason: "Verification failed" };
+  const publicKey = await applicationPublicKey();
+  const started = await privateRequest("POST", "/v1/x/verification", { xUserId });
+  if (!started.ok) return { ok: false, reason: await verificationFailure(started) };
+  const startBody: unknown = await started.json();
+  if (!startBody || typeof startBody !== "object") return { ok: false, reason: "Verification failed" };
+  const { authorizationUrl, state } = startBody as { authorizationUrl?: unknown; state?: unknown };
+  if (typeof authorizationUrl !== "string" || !authorizationUrl.startsWith("https://") || typeof state !== "string") return { ok: false, reason: "Verification failed" };
+  let redirected: string;
+  try {
+    redirected = await launchXAuth(authorizationUrl);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    return { ok: false, reason: /cancel|denied|closed|did not approve/i.test(message) ? "Verification was canceled" : "Verification failed" };
+  }
+  let callback: URL;
+  try {
+    callback = new URL(redirected);
+  } catch {
+    return { ok: false, reason: "Verification failed" };
+  }
+  if (callback.searchParams.get("error")) return { ok: false, reason: "Verification was canceled" };
+  const code = callback.searchParams.get("code");
+  if (!code || callback.searchParams.get("state") !== state) return { ok: false, reason: "Verification failed" };
+  if (publicKey !== await applicationPublicKey()) return { ok: false, reason: "Identity changed during verification" };
+  const completed = await privateRequest("POST", "/v1/x/verification/complete", { state, code });
+  if (!completed.ok) return { ok: false, reason: await verificationFailure(completed) };
+  if (publicKey !== await applicationPublicKey()) return { ok: false, reason: "Identity changed during verification" };
+  await chrome.storage.local.remove(CACHE_KEY);
+  return { ok: true };
+}
+
+function launchXAuth(url: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    chrome.identity.launchWebAuthFlow({ url, interactive: true }, (redirectUrl) => {
+      const message = chrome.runtime.lastError?.message;
+      if (message || !redirectUrl) {
+        reject(new Error(message || "Verification was canceled"));
+        return;
+      }
+      resolve(redirectUrl);
+    });
+  });
+}
+
+async function verificationFailure(response: Response): Promise<string> {
+  const body: unknown = await response.json().catch(() => null);
+  const code = body && typeof body === "object" && "error" in body && body.error && typeof body.error === "object" && "code" in body.error
+    ? (body.error as { code?: unknown }).code
+    : null;
+  const reasons: Record<string, string> = {
+    verification_unavailable: "Verification is unavailable",
+    account_held: "This X account is verified to another identity",
+    account_disputed: "Ownership of this X account is under review",
+    account_mismatch: "The X account did not match",
+    verification_expired: "Verification expired. Try again",
+    verification_failed: "X did not confirm this account",
+  };
+  return typeof code === "string" ? reasons[code] ?? "Verification failed" : "Verification failed";
 }
 
 async function postOnce(payload: SignedObservation): Promise<boolean> {

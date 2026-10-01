@@ -43,7 +43,7 @@ const manifest = {
   background: {
     service_worker: "background.js",
   },
-  permissions: ["storage", "sidePanel"],
+  permissions: ["storage", "sidePanel", "identity"],
   side_panel: {
     default_path: "sidepanel.html",
   },

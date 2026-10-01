@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { formatSol, parseBalances, parseClaim, parseEvents, trackedAccounts } from "./private-data.ts";
+import { formatSol, parseBalances, parseClaim, parseEvents, parseVerification, trackedAccounts } from "./private-data.ts";
 
 describe("private backend contract", () => {
   it("parses cursor history with numeric attribution and a finalized token link", () => {
@@ -32,6 +32,15 @@ describe("private backend contract", () => {
     assert.equal(formatSol("50000000"), "0.05 SOL");
     assert.equal(parseClaim({ id: "claim", status: "held", amountLamports: "50000000", destination: "11111111111111111111111111111111", transactionSignature: null }).status, "held");
     assert.throws(() => parseClaim({ id: "claim", status: "paid", amountLamports: "50000000", destination: "11111111111111111111111111111111", transactionSignature: null }));
+  });
+
+  it("reads whether this identity verified each X account", () => {
+    assert.deepEqual(parseVerification({ accounts: [{ xUserId: "12345", status: "self" }, { xUserId: "67890", status: "other" }, { xUserId: "42", status: "none" }] }), [
+      { xUserId: "12345", status: "self" },
+      { xUserId: "67890", status: "other" },
+      { xUserId: "42", status: "none" },
+    ]);
+    assert.throws(() => parseVerification({ accounts: [{ xUserId: "12345", status: "verified" }] }));
   });
 
   it("uses numeric IDs as the tracked account key across handle changes", () => {

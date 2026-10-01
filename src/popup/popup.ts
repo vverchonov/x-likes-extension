@@ -2,7 +2,7 @@ import { X_PROFILE_URL, WEBSITE_URL } from "../config.ts";
 import { acceptDisclaimer, isDisclaimerAccepted } from "../lib/consent.ts";
 import { formatSol } from "../lib/private-data.ts";
 import { isSolanaAddress } from "../lib/solana.ts";
-import { allAccountsSelection, clearClaimHistory, currentSelection, mountPrivateView, refreshClaimHistory, refreshClaimStatus, refreshPrivateView, revealFeed, rowSelection, selectClaim, setClaim } from "./private-view.ts";
+import { allAccountsSelection, clearClaimHistory, currentSelection, mountPrivateView, noteVerification, refreshClaimHistory, refreshClaimStatus, refreshPrivateView, revealFeed, rowSelection, selectClaim, setClaim } from "./private-view.ts";
 
 const toggle = document.querySelector("#capture-toggle");
 const settings = document.querySelector("#settings");
@@ -235,6 +235,14 @@ if (
     if (!xUserId) return;
     if (button.dataset.action === "remove") {
       askToRemove(xUserId, button.closest("article")?.querySelector(".label")?.textContent ?? xUserId);
+      return;
+    }
+    if (button.dataset.action === "verify") {
+      button.disabled = true;
+      void chrome.runtime.sendMessage({ type: "verify-account", xUserId }).then((response: { ok?: boolean; reason?: string }) => {
+        noteVerification(xUserId, response?.ok ? "" : response?.reason || "Verification failed");
+        void refreshPrivateView(true);
+      });
       return;
     }
     if (button.dataset.action !== "claim") return;

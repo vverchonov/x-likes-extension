@@ -6,6 +6,8 @@ import type { LikedPostPayload } from "./types.ts";
 export type TrackedAccount = { xUserId: string; username: string };
 export type LaunchCapacity = { xUserId: string; used: number; limit: number };
 export type AccountStatistics = { xUserId: string; engagements: number; tokensCreated: number; attributedRewardsLamports: string };
+export type VerificationStatus = "none" | "self" | "other";
+export type AccountVerification = { xUserId: string; status: VerificationStatus };
 export type ProcessingStatus = "already_claimed" | "pending" | "deferred" | "grounding" | "filtering" | "rejected" | "generating" | "ready" | "sending" | "unresolved" | "finalized" | "failed";
 export type EventRow = LikedPostPayload & { id: string; xUserId: string; intentId: string | null; receivedAt: string; status: "received"; processingStatus: ProcessingStatus; canForceCreate: boolean; tokenUrl: string | null; creatorEarningsLamports: string | null };
 export type Balance = { xUserId: string; availableLamports: string; pendingLamports: string; claimedLamports: string; paused: boolean };
@@ -39,6 +41,16 @@ export function parseLaunchCapacity(value: unknown): LaunchCapacity[] {
     const row = entry as Partial<LaunchCapacity> | null;
     if (!row || !isXUserId(row.xUserId) || !Number.isSafeInteger(row.used) || row.used! < 0 || !Number.isSafeInteger(row.limit) || row.limit! < 1) throw new Error("Invalid launch capacity");
     return { xUserId: row.xUserId, used: row.used!, limit: row.limit! };
+  });
+}
+
+export function parseVerification(value: unknown): AccountVerification[] {
+  if (!value || typeof value !== "object" || !Array.isArray((value as { accounts?: unknown }).accounts)) throw new Error("Invalid verification");
+  const statuses = new Set<VerificationStatus>(["none", "self", "other"]);
+  return (value as { accounts: unknown[] }).accounts.map((entry) => {
+    const row = entry as Partial<AccountVerification> | null;
+    if (!row || !isXUserId(row.xUserId) || !row.status || !statuses.has(row.status)) throw new Error("Invalid verification");
+    return { xUserId: row.xUserId, status: row.status };
   });
 }
 
