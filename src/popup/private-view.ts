@@ -394,7 +394,7 @@ function paintHistory(events: EventRow[] | null): void {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "force-create";
-      button.textContent = forcing.has(event.id) ? "Creating coin…" : "Create coin anyway";
+      button.textContent = forcing.has(event.id) ? "Creating coin…" : "create coin anyway";
       button.disabled = forcing.has(event.id) || limitReached;
       button.addEventListener("click", () => { void forceCreate(event.id); });
       wrap.append(button);
