@@ -365,6 +365,7 @@ function paintHistory(events: EventRow[] | null): void {
   for (const event of events) {
     const article = document.createElement("article");
     article.className = "post";
+    article.dataset.eventId = event.id;
     const visibleText = event.text ? stripTrailingMediaLinks(event.text, event.media.length) : null;
     if (visibleText) { const text = document.createElement("p"); text.className = "text"; text.textContent = visibleText; article.append(text); }
     if (event.media.length) {
@@ -501,7 +502,9 @@ async function forceCreate(eventId: string): Promise<void> {
   if (forcing.has(eventId) || !events?.some((event) => event.id === eventId && canOfferForce(event))) return;
   forcing.add(eventId);
   forceErrors.delete(eventId);
+  const anchor = timelineAnchor();
   paintHistory(events);
+  restoreTimelineAnchor(anchor);
   try {
     const response: unknown = await chrome.runtime.sendMessage({ type: "force-create", eventId });
     const result = response && typeof response === "object" ? response as { ok?: unknown; reason?: unknown } : null;
@@ -510,13 +513,34 @@ async function forceCreate(eventId: string): Promise<void> {
       forceErrors.set(eventId, reason === "capacity" ? "This account is at its coin limit for this hour." : reason === "conflict" ? "This post can't be forced into a coin." : "Couldn't create the coin. Try again.");
       return;
     }
-    await refreshPrivateView(true);
+    if (activeRefreshes) refreshPending = true;
+    else await refreshPrivateView(true, true);
   } catch {
     forceErrors.set(eventId, "Couldn't create the coin. Try again.");
   } finally {
     forcing.delete(eventId);
     if (snapshot?.events) paintHistory(snapshot.events);
+    restoreTimelineAnchor(anchor);
   }
+}
+
+function timelineAnchor(): { id: string; offset: number } | null {
+  const root = document.querySelector("#timeline");
+  if (!(root instanceof HTMLElement)) return null;
+  const top = root.getBoundingClientRect().top;
+  const posts = [...root.querySelectorAll<HTMLElement>(".post")];
+  const current = posts.find((post) => post.getBoundingClientRect().bottom > top + 1);
+  const id = current?.dataset.eventId;
+  if (!current || !id) return null;
+  return { id, offset: current.getBoundingClientRect().top - top };
+}
+
+function restoreTimelineAnchor(anchor: { id: string; offset: number } | null): void {
+  if (!anchor) return;
+  const root = document.querySelector("#timeline");
+  const post = root?.querySelector<HTMLElement>(`[data-event-id="${CSS.escape(anchor.id)}"]`);
+  if (!(root instanceof HTMLElement) || !post) return;
+  root.scrollTop += post.getBoundingClientRect().top - root.getBoundingClientRect().top - anchor.offset;
 }
 
 function activityStatus(status: EventRow["processingStatus"]): string | null {
