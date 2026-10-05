@@ -282,8 +282,8 @@ function paintAccounts(accounts: TrackedAccount[], balances: Balances | null): v
     const statistics = snapshot?.statistics?.find((entry) => entry.xUserId === account.xUserId);
     const facts = document.createElement("dl");
     facts.className = "account-facts";
-    appendAccountFact(facts, quota ? `${quota.used}/${quota.limit}` : "–", "This hour");
-    appendAccountFact(facts, statistics ? statistics.engagements.toLocaleString() : "–", "Engagements");
+    appendAccountFact(facts, quota ? `${quota.used}/${quota.limit}` : "–", "Limits");
+    appendAccountFact(facts, statistics ? statistics.engagements.toLocaleString() : "–", "Actions");
     appendAccountFact(facts, statistics ? statistics.tokensCreated.toLocaleString() : "–", "Coins");
     const note = verificationNotes.get(account.xUserId);
     const caption = note

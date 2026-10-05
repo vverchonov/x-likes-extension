@@ -623,6 +623,7 @@ body:not(.is-locked) .disclaimer {
 }
 
 .account-main {
+  flex: 1;
   min-width: 0;
 }
 
@@ -680,13 +681,14 @@ body:not(.is-locked) .disclaimer {
 }
 
 .account-facts {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
+  display: flex;
+  width: 100%;
   margin: 10px 0 0;
 }
 
 .account-facts div {
+  flex: 0 0 33.333%;
+  width: 33.333%;
   min-width: 0;
 }
 
