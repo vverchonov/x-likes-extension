@@ -1,3 +1,4 @@
+import { SITE_ORIGINS } from "./config.ts";
 import { isCaptureEnabled } from "./lib/capture.ts";
 import { isDisclaimerAccepted } from "./lib/consent.ts";
 import { httpsUrl } from "./lib/extract.ts";
@@ -61,6 +62,20 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
   if (seen) {
     if (!isContentSender(sender)) return;
     void rememberSeenAccount(seen).catch((error) => console.error("Account tracking failed", error));
+    return;
+  }
+
+  if (isSiteSender(sender)) {
+    const request = dataRequest(message);
+    if (request) {
+      void loadData(request.force, request.xUserId).then((response) => sendResponse(response)).catch(() => sendResponse({ ok: false, reason: "failed", accounts: [] }));
+      return true;
+    }
+    if (message && typeof message === "object" && (message as { type?: unknown }).type === "history-next") {
+      const page = message as { cursor?: unknown; xUserId?: unknown };
+      void nextHistory(page.cursor, page.xUserId).then((response) => sendResponse(response)).catch(() => sendResponse({ ok: false }));
+      return true;
+    }
     return;
   }
 
@@ -135,6 +150,18 @@ function isPopupSender(sender: chrome.runtime.MessageSender): boolean {
 
 function isContentSender(sender: chrome.runtime.MessageSender): boolean {
   return sender.id === chrome.runtime.id && typeof sender.url === "string" && sender.url.startsWith("https://x.com/") && sender.tab?.id != null;
+}
+
+function isSiteSender(sender: chrome.runtime.MessageSender): boolean {
+  if (sender.id !== chrome.runtime.id || typeof sender.url !== "string" || sender.tab?.id == null) return false;
+  let url: URL;
+  try {
+    url = new URL(sender.url);
+  } catch {
+    return false;
+  }
+  if (url.protocol === "http:" && (url.hostname === "localhost" || url.hostname === "127.0.0.1")) return true;
+  return SITE_ORIGINS.includes(url.origin);
 }
 
 async function deliver(payload: SignedObservation): Promise<void> {
