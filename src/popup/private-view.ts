@@ -385,6 +385,21 @@ function paintHistory(events: EventRow[] | null): void {
     link.rel = "noreferrer";
     link.textContent = "view post";
     links.append(link);
+    const quota = forceQuota(event);
+    if (quota || forcing.has(event.id)) {
+      const limitReached = quota != null && quota.used >= quota.limit && !forcing.has(event.id);
+      const wrap = document.createElement("span");
+      wrap.className = "force-create-wrap";
+      if (limitReached) wrap.title = "This hour's coin limit is reached. Try again later.";
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "force-create";
+      button.textContent = forcing.has(event.id) ? "Creating coin…" : "Create coin anyway";
+      button.disabled = forcing.has(event.id) || limitReached;
+      button.addEventListener("click", () => { void forceCreate(event.id); });
+      wrap.append(button);
+      links.append(wrap);
+    }
     if (event.tokenUrl) {
       const token = link.cloneNode() as HTMLAnchorElement;
       token.href = event.tokenUrl;
@@ -406,27 +421,12 @@ function paintHistory(events: EventRow[] | null): void {
       status.textContent = statusText;
       meta.append(status);
     }
-    const quota = forceQuota(event);
-    if (quota || forcing.has(event.id)) {
-      const limitReached = quota != null && quota.used >= quota.limit && !forcing.has(event.id);
-      const wrap = document.createElement("span");
-      wrap.className = "force-create-wrap";
-      if (limitReached) wrap.title = "This hour's coin limit is reached. Try again later.";
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "force-create";
-      button.textContent = forcing.has(event.id) ? "Creating coin…" : "Create coin anyway";
-      button.disabled = forcing.has(event.id) || limitReached;
-      button.addEventListener("click", () => { void forceCreate(event.id); });
-      wrap.append(button);
-      meta.append(wrap);
-      const message = forceErrors.get(event.id);
-      if (message) {
-        const error = document.createElement("p");
-        error.className = "activity-status";
-        error.textContent = message;
-        meta.append(error);
-      }
+    const message = forceErrors.get(event.id);
+    if (message) {
+      const error = document.createElement("p");
+      error.className = "activity-status";
+      error.textContent = message;
+      meta.append(error);
     }
     article.append(meta);
     if (event.avatarUrl && isLikedUsername(event.username)) {

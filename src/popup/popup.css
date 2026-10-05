@@ -1232,7 +1232,6 @@ body:not(.is-locked) .disclaimer {
 }
 
 .force-create-wrap {
-  align-self: flex-start;
   display: inline-flex;
 }
 
@@ -1241,12 +1240,10 @@ body:not(.is-locked) .disclaimer {
 }
 
 .force-create {
-  height: 28px;
-  padding: 0 12px;
+  padding: 0;
   border: 0;
-  border-radius: 999px;
-  background: var(--primary);
-  color: #ffffff;
+  background: transparent;
+  color: var(--primary);
   font: inherit;
   font-size: 13px;
   font-weight: 700;
@@ -1254,11 +1251,11 @@ body:not(.is-locked) .disclaimer {
 }
 
 .force-create:hover {
-  background: #1a8cd8;
+  text-decoration: underline;
 }
 
 .force-create:disabled {
-  background: var(--switch-off);
+  color: var(--muted);
   pointer-events: none;
 }
 
