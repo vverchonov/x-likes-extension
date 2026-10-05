@@ -335,7 +335,8 @@ async function verifyAccount(xUserId: unknown): Promise<{ ok: true } | { ok: fal
   const accounts = await readAccounts();
   if (!accounts.some((account) => account.xUserId === xUserId)) return { ok: false, reason: "Verification failed" };
   const publicKey = await applicationPublicKey();
-  const started = await privateRequest("POST", "/v1/x/verification", { xUserId });
+  const redirectUri = chrome.identity.getRedirectURL();
+  const started = await privateRequest("POST", "/v1/x/verification", { xUserId, redirectUri });
   if (!started.ok) return { ok: false, reason: await verificationFailure(started) };
   const startBody: unknown = await started.json();
   if (!startBody || typeof startBody !== "object") return { ok: false, reason: "Verification failed" };
@@ -355,6 +356,7 @@ async function verifyAccount(xUserId: unknown): Promise<{ ok: true } | { ok: fal
     return { ok: false, reason: "Verification failed" };
   }
   if (callback.searchParams.get("error")) return { ok: false, reason: "Verification was canceled" };
+  if (callback.origin + callback.pathname !== redirectUri) return { ok: false, reason: "Verification failed" };
   const code = callback.searchParams.get("code");
   if (!code || callback.searchParams.get("state") !== state) return { ok: false, reason: "Verification failed" };
   if (publicKey !== await applicationPublicKey()) return { ok: false, reason: "Identity changed during verification" };
