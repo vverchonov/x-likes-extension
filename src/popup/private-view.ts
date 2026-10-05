@@ -273,13 +273,14 @@ function paintAccounts(accounts: TrackedAccount[], balances: Balances | null): v
     name.rel = "noreferrer";
     name.textContent = `@${account.username}`;
     const verification = snapshot?.verification?.find((entry) => entry.xUserId === account.xUserId)?.status;
+    const statistics = snapshot?.statistics?.find((entry) => entry.xUserId === account.xUserId);
+    const newAccount = balances !== null && !amount && verification === "none" && statistics?.engagements === 0 && statistics.tokensCreated === 0;
     heading.append(name);
     if (verification === "self") heading.append(verifiedBadge());
     const balance = document.createElement("p");
     balance.className = "account-balance";
-    balance.textContent = amount ? availableUsd(amount.availableLamports, balances?.claimEligibility.solUsd ?? null) : "– USD";
+    balance.textContent = amount ? availableUsd(amount.availableLamports, balances?.claimEligibility.solUsd ?? null) : newAccount ? "$0.00 available" : "– USD";
     const quota = snapshot?.capacity?.find((entry) => entry.xUserId === account.xUserId);
-    const statistics = snapshot?.statistics?.find((entry) => entry.xUserId === account.xUserId);
     const facts = document.createElement("dl");
     facts.className = "account-facts";
     appendAccountFact(facts, quota ? `${quota.used}/${quota.limit}` : "–", "Limits");
@@ -318,7 +319,7 @@ function paintAccounts(accounts: TrackedAccount[], balances: Balances | null): v
     const canClaim = Boolean(amount && rowSelection(account.xUserId) && aboveMinimum(amount.availableLamports, balances?.claimEligibility.solUsd ?? null));
     claimButton.disabled = !canClaim;
     const minimumBlocked = !canClaim && isAccountMinimumBlock(amount, balances);
-    claimButton.textContent = canClaim || minimumBlocked ? "Claim" : accountClaimLabel(amount, balances);
+    claimButton.textContent = canClaim || minimumBlocked || newAccount ? "Claim" : accountClaimLabel(amount, balances);
     const wrap = document.createElement("span");
     wrap.className = "claim-wrap";
     wrap.append(claimButton);
