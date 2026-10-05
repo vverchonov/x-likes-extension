@@ -286,19 +286,10 @@ function paintAccounts(accounts: TrackedAccount[], balances: Balances | null): v
     appendAccountFact(facts, statistics ? statistics.engagements.toLocaleString() : "–", "Actions");
     appendAccountFact(facts, statistics ? statistics.tokensCreated.toLocaleString() : "–", "Coins");
     const note = verificationNotes.get(account.xUserId);
-    const caption = note
-      ? note
-      : verification === "none"
-        ? "Not verified"
-        : verification === "other"
-          ? "Verified by another identity"
-          : verification === "self"
-            ? ""
-            : "Verification unavailable";
     const status = document.createElement("p");
     status.className = "account-verification";
-    status.textContent = caption;
-    main.append(heading, ...(caption ? [status] : []), balance, facts);
+    status.textContent = note ?? "";
+    main.append(heading, ...(note ? [status] : []), balance, facts);
     const actions = document.createElement("div");
     actions.className = "account-actions";
     if (verification === "none") {
