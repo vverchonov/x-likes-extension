@@ -238,7 +238,13 @@ function paintAllAccounts(): void {
   const balances = snapshot?.balances ?? null;
   if (balance) balance.textContent = balances ? availableUsd(balances.combined.availableLamports, balances.claimEligibility.solUsd) : "– USD";
   if (!(button instanceof HTMLButtonElement)) return;
-  const canClaim = Boolean(allAccountsSelection() && balances && aboveMinimum(balances.combined.availableLamports, balances.claimEligibility.solUsd));
+  if (!balances) {
+    button.hidden = true;
+    setMinimumHint(button, false);
+    return;
+  }
+  button.hidden = false;
+  const canClaim = Boolean(allAccountsSelection() && aboveMinimum(balances.combined.availableLamports, balances.claimEligibility.solUsd));
   button.disabled = !canClaim;
   button.textContent = canClaim || isCombinedMinimumBlock(balances) ? "Claim all" : combinedClaimLabel(balances);
   setMinimumHint(button, !canClaim && isCombinedMinimumBlock(balances));
@@ -289,7 +295,7 @@ function paintAccounts(accounts: TrackedAccount[], balances: Balances | null): v
     const status = document.createElement("p");
     status.className = "account-verification";
     status.textContent = note ?? "";
-    main.append(heading, ...(note ? [status] : []), balance, facts);
+    main.append(heading, ...(note ? [status] : []), balance);
     const actions = document.createElement("div");
     actions.className = "account-actions";
     if (verification === "none") {
@@ -301,21 +307,24 @@ function paintAccounts(accounts: TrackedAccount[], balances: Balances | null): v
       verifyButton.textContent = "Verify";
       actions.append(verifyButton);
     }
-    const claimButton = document.createElement("button");
-    claimButton.className = "payout-button account-claim";
-    claimButton.type = "button";
-    claimButton.dataset.action = "claim";
-    claimButton.dataset.xUserId = account.xUserId;
-    const canClaim = Boolean(amount && rowSelection(account.xUserId) && aboveMinimum(amount.availableLamports, balances?.claimEligibility.solUsd ?? null));
-    claimButton.disabled = !canClaim;
-    const minimumBlocked = !canClaim && isAccountMinimumBlock(amount, balances);
-    claimButton.textContent = canClaim || minimumBlocked ? "Claim" : accountClaimLabel(amount, balances);
-    const wrap = document.createElement("span");
-    wrap.className = "claim-wrap";
-    wrap.append(claimButton);
-    setMinimumHint(claimButton, minimumBlocked);
-    actions.append(wrap);
-    article.append(main, actions);
+    const claimLabel = accountClaimLabel(amount, balances);
+    if (claimLabel !== "Balance unavailable") {
+      const claimButton = document.createElement("button");
+      claimButton.className = "payout-button account-claim";
+      claimButton.type = "button";
+      claimButton.dataset.action = "claim";
+      claimButton.dataset.xUserId = account.xUserId;
+      const canClaim = Boolean(amount && rowSelection(account.xUserId) && aboveMinimum(amount.availableLamports, balances?.claimEligibility.solUsd ?? null));
+      claimButton.disabled = !canClaim;
+      const minimumBlocked = !canClaim && isAccountMinimumBlock(amount, balances);
+      claimButton.textContent = canClaim || minimumBlocked ? "Claim" : claimLabel;
+      const wrap = document.createElement("span");
+      wrap.className = "claim-wrap";
+      wrap.append(claimButton);
+      setMinimumHint(claimButton, minimumBlocked);
+      actions.append(wrap);
+    }
+    article.append(main, ...(actions.childElementCount > 0 ? [actions] : []), facts);
     root.append(article);
   }
   root.scrollTop = scroll;
