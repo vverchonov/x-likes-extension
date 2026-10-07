@@ -16,16 +16,20 @@ if (backendUrl.protocol === "http:" && !["localhost", "127.0.0.1", "[::1]"].incl
 }
 const beOrigin = backendUrl.origin;
 
+const siteOrigins = websiteOrigins(websiteUrl);
+
 const define = {
   __BE_ENDPOINT__: JSON.stringify(beEndpoint),
   __X_PROFILE_URL__: JSON.stringify(xProfileUrl),
   __WEBSITE_URL__: JSON.stringify(websiteUrl),
+  __SITE_ORIGINS__: JSON.stringify(siteOrigins),
 };
 
 const entries = [
   ["src/background.ts", "background.js"],
   ["src/content.ts", "content.js"],
   ["src/page-hook.ts", "page-hook.js"],
+  ["src/site-bridge.ts", "site-bridge.js"],
   ["src/popup/popup.ts", "popup.js"],
 ];
 
@@ -60,6 +64,11 @@ const manifest = {
       js: ["content.js"],
       run_at: "document_start",
     },
+    {
+      matches: [...siteOrigins.map((origin) => `${origin}/*`), "http://localhost/*", "http://127.0.0.1/*"],
+      js: ["site-bridge.js"],
+      run_at: "document_start",
+    },
   ],
   icons: iconPaths(),
 };
@@ -89,6 +98,13 @@ for (const browser of ["chrome", "brave"]) {
     cpSync(resolve(root, "icons", `icon${size}.png`), resolve(outdir, "icons", `icon${size}.png`));
   }
   writeFileSync(resolve(outdir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
+function websiteOrigins(websiteUrl) {
+  const url = new URL(websiteUrl);
+  const origins = new Set([url.origin]);
+  if (url.hostname.startsWith("www.")) origins.add(`${url.protocol}//${url.hostname.slice(4)}`);
+  return [...origins];
 }
 
 function hostPermissions(origin) {

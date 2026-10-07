@@ -238,7 +238,13 @@ function paintAllAccounts(): void {
   const balances = snapshot?.balances ?? null;
   if (balance) balance.textContent = balances ? availableUsd(balances.combined.availableLamports, balances.claimEligibility.solUsd) : "– USD";
   if (!(button instanceof HTMLButtonElement)) return;
-  const canClaim = Boolean(allAccountsSelection() && balances && aboveMinimum(balances.combined.availableLamports, balances.claimEligibility.solUsd));
+  if (!balances) {
+    button.hidden = true;
+    setMinimumHint(button, false);
+    return;
+  }
+  button.hidden = false;
+  const canClaim = Boolean(allAccountsSelection() && aboveMinimum(balances.combined.availableLamports, balances.claimEligibility.solUsd));
   button.disabled = !canClaim;
   button.textContent = canClaim || isCombinedMinimumBlock(balances) ? "Claim all" : combinedClaimLabel(balances);
   setMinimumHint(button, !canClaim && isCombinedMinimumBlock(balances));
@@ -287,19 +293,10 @@ function paintAccounts(accounts: TrackedAccount[], balances: Balances | null): v
     appendAccountFact(facts, statistics ? statistics.engagements.toLocaleString() : "–", "Actions");
     appendAccountFact(facts, statistics ? statistics.tokensCreated.toLocaleString() : "–", "Coins");
     const note = verificationNotes.get(account.xUserId);
-    const caption = note
-      ? note
-      : verification === "none"
-        ? "Not verified"
-        : verification === "other"
-          ? "Verified by another identity"
-          : verification === "self"
-            ? ""
-            : "Verification unavailable";
     const status = document.createElement("p");
     status.className = "account-verification";
-    status.textContent = caption;
-    main.append(heading, ...(caption ? [status] : []), balance, facts);
+    status.textContent = note ?? "";
+    main.append(heading, ...(note ? [status] : []), balance);
     const actions = document.createElement("div");
     actions.className = "account-actions";
     if (verification === "none") {
@@ -311,21 +308,24 @@ function paintAccounts(accounts: TrackedAccount[], balances: Balances | null): v
       verifyButton.textContent = "Verify";
       actions.append(verifyButton);
     }
-    const claimButton = document.createElement("button");
-    claimButton.className = "payout-button account-claim";
-    claimButton.type = "button";
-    claimButton.dataset.action = "claim";
-    claimButton.dataset.xUserId = account.xUserId;
-    const canClaim = Boolean(amount && rowSelection(account.xUserId) && aboveMinimum(amount.availableLamports, balances?.claimEligibility.solUsd ?? null));
-    claimButton.disabled = !canClaim;
-    const minimumBlocked = !canClaim && isAccountMinimumBlock(amount, balances);
-    claimButton.textContent = canClaim || minimumBlocked || newAccount ? "Claim" : accountClaimLabel(amount, balances);
-    const wrap = document.createElement("span");
-    wrap.className = "claim-wrap";
-    wrap.append(claimButton);
-    setMinimumHint(claimButton, minimumBlocked);
-    actions.append(wrap);
-    article.append(main, actions);
+    const claimLabel = newAccount ? "Claim" : accountClaimLabel(amount, balances);
+    if (claimLabel !== "Balance unavailable") {
+      const claimButton = document.createElement("button");
+      claimButton.className = "payout-button account-claim";
+      claimButton.type = "button";
+      claimButton.dataset.action = "claim";
+      claimButton.dataset.xUserId = account.xUserId;
+      const canClaim = Boolean(amount && rowSelection(account.xUserId) && aboveMinimum(amount.availableLamports, balances?.claimEligibility.solUsd ?? null));
+      claimButton.disabled = !canClaim;
+      const minimumBlocked = !canClaim && isAccountMinimumBlock(amount, balances);
+      claimButton.textContent = canClaim || minimumBlocked ? "Claim" : claimLabel;
+      const wrap = document.createElement("span");
+      wrap.className = "claim-wrap";
+      wrap.append(claimButton);
+      setMinimumHint(claimButton, minimumBlocked);
+      actions.append(wrap);
+    }
+    article.append(main, ...(actions.childElementCount > 0 ? [actions] : []), facts);
     root.append(article);
   }
   root.scrollTop = scroll;
@@ -366,6 +366,7 @@ function paintHistory(events: EventRow[] | null): void {
   for (const event of events) {
     const article = document.createElement("article");
     article.className = "post";
+    article.dataset.eventId = event.id;
     const visibleText = event.text ? stripTrailingMediaLinks(event.text, event.media.length) : null;
     if (visibleText) { const text = document.createElement("p"); text.className = "text"; text.textContent = visibleText; article.append(text); }
     if (event.media.length) {
@@ -394,6 +395,21 @@ function paintHistory(events: EventRow[] | null): void {
     link.rel = "noreferrer";
     link.textContent = "view post";
     links.append(link);
+    const quota = forceQuota(event);
+    if (quota || forcing.has(event.id)) {
+      const limitReached = quota != null && quota.used >= quota.limit && !forcing.has(event.id);
+      const wrap = document.createElement("span");
+      wrap.className = "force-create-wrap";
+      if (limitReached) wrap.title = "This hour's coin limit is reached. Try again later.";
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "force-create";
+      button.textContent = forcing.has(event.id) ? "Creating coin…" : "create coin anyway";
+      button.disabled = forcing.has(event.id) || limitReached;
+      button.addEventListener("click", () => { void forceCreate(event.id); });
+      wrap.append(button);
+      links.append(wrap);
+    }
     if (event.tokenUrl) {
       const token = link.cloneNode() as HTMLAnchorElement;
       token.href = event.tokenUrl;
@@ -415,27 +431,12 @@ function paintHistory(events: EventRow[] | null): void {
       status.textContent = statusText;
       meta.append(status);
     }
-    const quota = forceQuota(event);
-    if (quota || forcing.has(event.id)) {
-      const limitReached = quota != null && quota.used >= quota.limit && !forcing.has(event.id);
-      const wrap = document.createElement("span");
-      wrap.className = "force-create-wrap";
-      if (limitReached) wrap.title = "This hour's coin limit is reached. Try again later.";
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "force-create";
-      button.textContent = forcing.has(event.id) ? "Creating coin…" : "Create coin anyway";
-      button.disabled = forcing.has(event.id) || limitReached;
-      button.addEventListener("click", () => { void forceCreate(event.id); });
-      wrap.append(button);
-      meta.append(wrap);
-      const message = forceErrors.get(event.id);
-      if (message) {
-        const error = document.createElement("p");
-        error.className = "activity-status";
-        error.textContent = message;
-        meta.append(error);
-      }
+    const message = forceErrors.get(event.id);
+    if (message) {
+      const error = document.createElement("p");
+      error.className = "activity-status";
+      error.textContent = message;
+      meta.append(error);
     }
     article.append(meta);
     if (event.avatarUrl && isLikedUsername(event.username)) {
@@ -502,7 +503,9 @@ async function forceCreate(eventId: string): Promise<void> {
   if (forcing.has(eventId) || !events?.some((event) => event.id === eventId && canOfferForce(event))) return;
   forcing.add(eventId);
   forceErrors.delete(eventId);
+  const anchor = timelineAnchor();
   paintHistory(events);
+  restoreTimelineAnchor(anchor);
   try {
     const response: unknown = await chrome.runtime.sendMessage({ type: "force-create", eventId });
     const result = response && typeof response === "object" ? response as { ok?: unknown; reason?: unknown } : null;
@@ -511,13 +514,34 @@ async function forceCreate(eventId: string): Promise<void> {
       forceErrors.set(eventId, reason === "capacity" ? "This account is at its coin limit for this hour." : reason === "conflict" ? "This post can't be forced into a coin." : "Couldn't create the coin. Try again.");
       return;
     }
-    await refreshPrivateView(true);
+    if (activeRefreshes) refreshPending = true;
+    else await refreshPrivateView(true, true);
   } catch {
     forceErrors.set(eventId, "Couldn't create the coin. Try again.");
   } finally {
     forcing.delete(eventId);
     if (snapshot?.events) paintHistory(snapshot.events);
+    restoreTimelineAnchor(anchor);
   }
+}
+
+function timelineAnchor(): { id: string; offset: number } | null {
+  const root = document.querySelector("#timeline");
+  if (!(root instanceof HTMLElement)) return null;
+  const top = root.getBoundingClientRect().top;
+  const posts = [...root.querySelectorAll<HTMLElement>(".post")];
+  const current = posts.find((post) => post.getBoundingClientRect().bottom > top + 1);
+  const id = current?.dataset.eventId;
+  if (!current || !id) return null;
+  return { id, offset: current.getBoundingClientRect().top - top };
+}
+
+function restoreTimelineAnchor(anchor: { id: string; offset: number } | null): void {
+  if (!anchor) return;
+  const root = document.querySelector("#timeline");
+  const post = root?.querySelector<HTMLElement>(`[data-event-id="${CSS.escape(anchor.id)}"]`);
+  if (!(root instanceof HTMLElement) || !post) return;
+  root.scrollTop += post.getBoundingClientRect().top - root.getBoundingClientRect().top - anchor.offset;
 }
 
 function activityStatus(status: EventRow["processingStatus"]): string | null {
