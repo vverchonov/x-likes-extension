@@ -19,20 +19,51 @@ const accountIds = new Map<string, string>();
 const pendingEngagements: { engagement: PageEngagement; username: string; avatarUrl: string | null }[] = [];
 
 let watching = false;
+let accountTimer: number | undefined;
+let contextInvalidated = false;
 
-void boot();
+void boot().catch(onCaptureError);
 
 async function boot(): Promise<void> {
   if (await isDisclaimerAccepted()) startWatching();
-  chrome.storage.onChanged.addListener((changes, area) => {
-    if (area !== "local") return;
-    if (changes[DISCLAIMER_ACCEPTED_KEY]?.newValue === true) startWatching();
-    if (changes.captureEnabled?.newValue === false) pendingEngagements.length = 0;
-  });
+  chrome.storage.onChanged.addListener(onStorageChanged);
+}
+
+function onStorageChanged(changes: Record<string, chrome.storage.StorageChange>, area: string): void {
+  if (!hasActiveContext() || area !== "local") return;
+  if (changes[DISCLAIMER_ACCEPTED_KEY]?.newValue === true) startWatching();
+  if (changes.captureEnabled?.newValue === false) pendingEngagements.length = 0;
+}
+
+function hasActiveContext(): boolean {
+  if (contextInvalidated) return false;
+  if (chrome.runtime?.id) return true;
+  stopWatching();
+  return false;
+}
+
+function stopWatching(): void {
+  contextInvalidated = true;
+  watching = false;
+  if (accountTimer !== undefined) window.clearInterval(accountTimer);
+  document.removeEventListener("click", onPostActionClick, true);
+  window.removeEventListener("message", onPageMessage);
+  document.documentElement?.removeAttribute(CAPTURE_CONSENT_ATTR);
+  pendingEngagements.length = 0;
+  recentArticles.clear();
+  accountIds.clear();
+}
+
+function onCaptureError(error: unknown): void {
+  if (!hasActiveContext() || (error instanceof Error && error.message.includes("Extension context invalidated"))) {
+    stopWatching();
+    return;
+  }
+  console.error("Observation capture failed", error);
 }
 
 function startWatching(): void {
-  if (watching) return;
+  if (!hasActiveContext() || watching) return;
   watching = true;
   document.documentElement?.setAttribute(CAPTURE_CONSENT_ATTR, "on");
   document.addEventListener("click", onPostActionClick, true);
@@ -42,6 +73,7 @@ function startWatching(): void {
 }
 
 function onPostActionClick(event: Event): void {
+  if (!hasActiveContext()) return;
   const button = actionButtonFromEvent(event);
   if (!button) return;
   const article = button.closest('article[data-testid="tweet"]');
@@ -51,6 +83,7 @@ function onPostActionClick(event: Event): void {
 }
 
 function onPageMessage(event: MessageEvent): void {
+  if (!hasActiveContext()) return;
   if (event.origin !== window.location.origin || event.source !== window) return;
   const account = pageAccountId(event.data);
   if (account) {
@@ -62,14 +95,14 @@ function onPageMessage(event: MessageEvent): void {
         if (pending.username.toLowerCase() !== account.username.toLowerCase()) { i++; continue; }
         pendingEngagements.splice(i, 1);
         void sendEngagedPost(pending.engagement, { username: pending.username, avatarUrl: pending.avatarUrl, xUserId: account.xUserId })
-          .catch((error) => console.error("Observation capture failed", error));
+          .catch(onCaptureError);
       }
     }
     return;
   }
   const engagement = pageEngagement(event.data);
   if (!engagement) return;
-  void onEngagement(engagement).catch((error) => console.error("Observation capture failed", error));
+  void onEngagement(engagement).catch(onCaptureError);
 }
 
 function onRuntimeMessage(message: unknown, _sender: chrome.runtime.MessageSender, sendResponse: (response: unknown) => void): void {
@@ -179,6 +212,7 @@ function observationFor(postId: string): DomObservation | null {
 }
 
 async function sendPayload(payload: LikedPostPayload, xUserId: string): Promise<void> {
+  if (!hasActiveContext()) return;
   await chrome.runtime.sendMessage({ type: "liked-post", payload: { ...payload, xUserId } });
 }
 
@@ -189,17 +223,17 @@ function isUsernameRequest(message: unknown): boolean {
 function watchSignedInAccount(): void {
   let reported = "";
   const report = () => {
+    if (!hasActiveContext()) return;
     const account = currentAccount();
     if (!account?.xUserId) return;
     const key = `${account.xUserId}:${account.username}`;
     if (key === reported) return;
     reported = key;
-    chrome.runtime.sendMessage({ type: "seen-account", username: account.username, xUserId: account.xUserId }, () => {
-      void chrome.runtime.lastError;
-    });
+    void chrome.runtime.sendMessage({ type: "seen-account", username: account.username, xUserId: account.xUserId })
+      .catch(onCaptureError);
   };
   report();
-  window.setInterval(report, 1000);
+  accountTimer = window.setInterval(report, 1000);
 }
 
 function currentAccount(): { username: string; avatarUrl: string | null; xUserId: string | null } | null {

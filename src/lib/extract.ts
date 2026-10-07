@@ -377,8 +377,10 @@ function applyDisplayRange(text: string, range: unknown): string {
   const start = range[0];
   const end = range[1];
   if (typeof start !== "number" || typeof end !== "number" || !Number.isInteger(start) || !Number.isInteger(end)) return text;
-  if (start < 0 || end < start || end > text.length) return text;
-  return text.slice(start, end);
+  const characters = Array.from(text);
+  if (start < 0 || end < start || end > characters.length) return text;
+  // X display ranges count Unicode code points, not JavaScript UTF-16 code units.
+  return characters.slice(start, end).join("");
 }
 
 function mediaShortUrls(legacy: Record<string, unknown>, node: Record<string, unknown>): string[] {
