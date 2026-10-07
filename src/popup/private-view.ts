@@ -547,14 +547,14 @@ function restoreTimelineAnchor(anchor: { id: string; offset: number } | null): v
 function activityStatus(status: EventRow["processingStatus"]): string | null {
   switch (status) {
     case "finalized": return null;
-    case "already_claimed": return "Someone already submitted this post for a coin.";
-    case "source_unresolved": return "Essential content from this post is unavailable.";
-    case "blocked": return "This post was blocked by a mandatory check.";
-    case "creative_rejected": return "No suitable coin concept was found for this post.";
-    case "rejected": return "This post wasn't selected for a coin.";
-    case "packaging_failed": return "Coin preparation failed for this post.";
-    case "failed": return "We couldn't create a coin for this post.";
-    case "deferred": return "Recorded; waiting for launch capacity.";
+    case "already_claimed": return "Already submitted";
+    case "source_unresolved":
+    case "packaging_failed":
+    case "failed": return "Couldn't create coin";
+    case "blocked": return "Not eligible";
+    case "creative_rejected":
+    case "rejected": return "Not selected";
+    case "deferred": return "Queued";
     case "pending":
     case "grounding":
     case "filtering":
