@@ -37,7 +37,7 @@ const manifest = {
   manifest_version: 3,
   name: "ScrollX",
   short_name: "ScrollX",
-  version: "0.1.0",
+  version: "0.1.1",
   description: "Shows posts you engaged with on X and lets you claim SOL rewards from their coins.",
   homepage_url: new URL(websiteUrl).origin + "/",
   action: {
