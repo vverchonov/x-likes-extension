@@ -487,7 +487,7 @@ function paintFeedMore(root: HTMLElement): void {
 }
 
 function forceQuota(event: EventRow): { used: number; limit: number } | null {
-  if (!event.canForceCreate || event.processingStatus !== "rejected" || !event.intentId) return null;
+  if (!event.canForceCreate || event.processingStatus !== "creative_rejected" || !event.intentId) return null;
   const quota = snapshot?.capacity?.find((entry) => entry.xUserId === event.xUserId);
   return quota ?? null;
 }
@@ -524,7 +524,11 @@ function activityStatus(status: EventRow["processingStatus"]): string | null {
   switch (status) {
     case "finalized": return null;
     case "already_claimed": return "Someone already submitted this post for a coin.";
+    case "source_unresolved": return "Essential content from this post is unavailable.";
+    case "blocked": return "This post was blocked by a mandatory check.";
+    case "creative_rejected": return "No suitable coin concept was found for this post.";
     case "rejected": return "This post wasn't selected for a coin.";
+    case "packaging_failed": return "Coin preparation failed for this post.";
     case "failed": return "We couldn't create a coin for this post.";
     case "deferred": return "Recorded; waiting for launch capacity.";
     case "pending":

@@ -7,7 +7,11 @@ describe("private backend contract", () => {
     const payload = { postId: "67890", xUserId: "12345", username: "alice", avatarUrl: null, text: null, media: [], url: "https://x.com/i/status/67890", likedAt: "2026-09-21T19:20:00.000Z" };
     const row = { ...payload, id: "event", intentId: "intent", receivedAt: payload.likedAt, status: "received", processingStatus: "pending", canForceCreate: false, tokenUrl: null, creatorEarningsLamports: null };
     assert.deepEqual(parseEvents({ events: [row], nextCursor: "opaque" }).events[0]?.processingStatus, "pending");
-    assert.equal(parseEvents({ events: [{ ...row, processingStatus: "rejected", canForceCreate: true }], nextCursor: null }).events[0]?.canForceCreate, true);
+    assert.equal(parseEvents({ events: [{ ...row, processingStatus: "creative_rejected", canForceCreate: true }], nextCursor: null }).events[0]?.canForceCreate, true);
+    for (const processingStatus of ["blocked", "source_unresolved", "packaging_failed", "rejected"]) {
+      assert.equal(parseEvents({ events: [{ ...row, processingStatus, canForceCreate: false }], nextCursor: null }).events[0]?.processingStatus, processingStatus);
+      assert.throws(() => parseEvents({ events: [{ ...row, processingStatus, canForceCreate: true }], nextCursor: null }));
+    }
     assert.equal(parseEvents({ events: [{ ...row, processingStatus: "finalized", tokenUrl: "https://pump.fun/coin/mint", creatorEarningsLamports: "0" }], nextCursor: null }).events[0]?.tokenUrl, "https://pump.fun/coin/mint");
     assert.equal(parseEvents({ events: [{ ...row, processingStatus: "finalized", tokenUrl: "https://pump.fun/coin/mint", creatorEarningsLamports: "12345678901234567890" }], nextCursor: null }).events[0]?.creatorEarningsLamports, "12345678901234567890");
     const claimed = { ...row, intentId: null, processingStatus: "already_claimed", canForceCreate: false, creatorEarningsLamports: null };
