@@ -25,6 +25,7 @@ async function openSession(): Promise<Session> {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ publicKey }),
+    signal: AbortSignal.timeout(15_000),
   });
   if (!challengeResponse.ok) throw new Error(`Challenge failed: ${challengeResponse.status}`);
   const challenge = (await challengeResponse.json()) as { challengeId: string; message: string };
@@ -33,6 +34,7 @@ async function openSession(): Promise<Session> {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ challengeId: challenge.challengeId, signature }),
+    signal: AbortSignal.timeout(15_000),
   });
   if (!response.ok) throw new Error(`Session failed: ${response.status}`);
   const result = (await response.json()) as { token: string; expiresAt: string };
@@ -95,6 +97,7 @@ export async function privateRequest(method: string, target: string, payload?: u
         ...(payload === undefined ? {} : { "content-type": "application/json" }),
       },
       ...(payload === undefined ? {} : { body }),
+      signal: AbortSignal.timeout(15_000),
     });
   }
 }

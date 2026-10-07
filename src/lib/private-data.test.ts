@@ -38,6 +38,17 @@ describe("private backend contract", () => {
     assert.throws(() => parseClaim({ id: "claim", status: "paid", amountLamports: "50000000", destination: "11111111111111111111111111111111", transactionSignature: null }));
   });
 
+  it("keeps unavailable posts and recoverable processing errors in later history pages", () => {
+    const row = { postId: "67890", xUserId: "12345", username: "alice", avatarUrl: null, text: null, media: [], url: "https://x.com/i/status/67890", likedAt: "2026-10-07T19:20:00.000Z", id: "event", intentId: "intent", receivedAt: "2026-10-07T19:20:00.000Z", status: "received", canForceCreate: false, tokenUrl: null, creatorEarningsLamports: null };
+    for (const processingStatus of ["post_unavailable", "retrying", "processing_paused"]) {
+      const page = parseEvents({ events: [{ ...row, processingStatus, failureReason: processingStatus === "processing_paused" ? "processing_limit" : null }], nextCursor: "next-page" });
+      assert.equal(page.events.length, 1);
+      assert.equal(page.events[0]?.processingStatus, processingStatus);
+      assert.equal(page.nextCursor, "next-page");
+    }
+    assert.throws(() => parseEvents({ events: [{ ...row, processingStatus: "retrying", failureReason: "raw-provider-error" }], nextCursor: null }));
+  });
+
   it("reads whether this identity verified each X account", () => {
     assert.deepEqual(parseVerification({ accounts: [{ xUserId: "12345", status: "self" }, { xUserId: "67890", status: "other" }, { xUserId: "42", status: "none" }] }), [
       { xUserId: "12345", status: "self" },

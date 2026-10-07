@@ -63,7 +63,7 @@ function install(): void {
     if (typeof id === "string" && /^[1-9][0-9]{0,19}$/.test(id)) {
       publishAccounts(state.entities?.users?.entities?.[id]);
     }
-    publishAccounts(initialState);
+    harvestValue(initialState);
   }
 }
 
@@ -103,22 +103,24 @@ function captureSend(
         if (!engagement) return;
         if (engagement.kind !== "like") {
           try {
-            harvestText(xhr.responseText);
+            if (xhr.responseType === "json") harvestValue(xhr.response);
+            else harvestText(xhr.responseText);
           } catch {
             // responseText throws when the response type is not text.
           }
         }
         publishResolvedEngagement(engagement);
       });
-    });
+    }, { once: true });
   } else if (shouldHarvestTweets(url)) {
     this.addEventListener("load", () => {
       try {
-        harvestText(this.responseText);
+        if (this.responseType === "json") harvestValue(this.response);
+        else harvestText(this.responseText);
       } catch {
         // responseText throws when the response type is not text.
       }
-    });
+    }, { once: true });
   }
   originalSend.call(this, body);
 }

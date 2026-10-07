@@ -15,12 +15,19 @@ const CLAIM_KEY = "activeClaimV1";
 const CLAIM_ATTEMPT_KEY = "claimAttemptV1";
 const PENDING_PREFIX = "pendingObservation:";
 const CACHE_MS = 60_000;
+const OBSERVATION_RETRY_ALARM = "retry-observations";
 type SignedObservation = LikedPostPayload & { xUserId: string };
 type Snapshot = { publicKey: string; accounts: TrackedAccount[]; historyIds: string[]; events: EventRow[] | null; nextCursor: string | null; balances: Balances | null; capacity: LaunchCapacity[] | null; statistics: AccountStatistics[] | null; verification: AccountVerification[] | null; fetchedAt: number };
 let claimInFlight: Promise<unknown> = Promise.resolve();
 let accountUpdates: Promise<unknown> = Promise.resolve();
 let observationUpdates: Promise<unknown> = Promise.resolve();
+let observationRetry: Promise<void> | undefined;
+const deliveries = new Map<string, Promise<void>>();
 
+void chrome.alarms.create(OBSERVATION_RETRY_ALARM, { periodInMinutes: 1 });
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === OBSERVATION_RETRY_ALARM) void retryObservations().catch((error) => console.error("Observation retry failed", error));
+});
 void retryObservations().catch((error) => console.error("Observation retry failed", error));
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "local" && changes.captureEnabled?.newValue === true) {
@@ -54,8 +61,8 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
   const payload = likedPostPayload(message);
   if (payload) {
     if (!isContentSender(sender)) return;
-    void deliver(payload).catch((error) => console.error("Observation delivery failed", error));
-    return;
+    void deliver(payload).then(() => sendResponse({ ok: true })).catch(() => sendResponse({ ok: false }));
+    return true;
   }
 
   const seen = seenAccount(message);
@@ -72,8 +79,8 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
       return true;
     }
     if (message && typeof message === "object" && (message as { type?: unknown }).type === "history-next") {
-      const page = message as { cursor?: unknown; xUserId?: unknown };
-      void nextHistory(page.cursor, page.xUserId).then((response) => sendResponse(response)).catch(() => sendResponse({ ok: false }));
+      const page = message as { cursor?: unknown; xUserId?: unknown; xUserIds?: unknown };
+      void nextHistory(page.cursor, page.xUserId, page.xUserIds).then((response) => sendResponse(response)).catch(() => sendResponse({ ok: false }));
       return true;
     }
     return;
@@ -99,8 +106,8 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
   }
 
   if (message && typeof message === "object" && (message as { type?: unknown }).type === "history-next") {
-    const page = message as { cursor?: unknown; xUserId?: unknown };
-    void nextHistory(page.cursor, page.xUserId).then((response) => sendResponse(response)).catch(() => sendResponse({ ok: false }));
+    const page = message as { cursor?: unknown; xUserId?: unknown; xUserIds?: unknown };
+    void nextHistory(page.cursor, page.xUserId, page.xUserIds).then((response) => sendResponse(response)).catch(() => sendResponse({ ok: false }));
     return true;
   }
 
@@ -188,26 +195,37 @@ async function deliver(payload: SignedObservation): Promise<void> {
 }
 
 async function flushObservation(key: string, payload: SignedObservation, publicKey: string): Promise<void> {
-  if (!(await isDisclaimerAccepted()) || !(await isCaptureEnabled())) return;
-  if (await applicationPublicKey() !== publicKey) return;
-  const delivered = await postOnce(payload);
-  if (!delivered) {
+  const inFlight = deliveries.get(key);
+  if (inFlight) return inFlight;
+  const delivery = sendObservation().finally(() => { deliveries.delete(key); });
+  deliveries.set(key, delivery);
+  return delivery;
+
+  async function sendObservation(): Promise<void> {
+    if (!(await isDisclaimerAccepted()) || !(await isCaptureEnabled())) return;
     if (await applicationPublicKey() !== publicKey) return;
-    const retried = await postOnce(payload);
-    if (!retried) {
-      console.error("Failed to send observation", payload.postId);
+    const delivered = await postOnce(payload);
+    if (!delivered) {
+      console.error("Observation queued for retry", payload.postId);
       return;
     }
+    if (await applicationPublicKey() !== publicKey) return;
+    const current = (await chrome.storage.local.get(key))[key] as { publicKey?: unknown; payload?: unknown } | undefined;
+    if (current?.publicKey === publicKey && JSON.stringify(asPayload(current.payload)) === JSON.stringify(payload)) await chrome.storage.local.remove(key);
+    await chrome.storage.local.remove(CACHE_KEY);
+    // The popup/side panel may already be open with an older history snapshot.
+    await chrome.runtime.sendMessage({ type: "observation-delivered" }).catch(() => undefined);
   }
-  if (await applicationPublicKey() !== publicKey) return;
-  const current = (await chrome.storage.local.get(key))[key] as { publicKey?: unknown; payload?: unknown } | undefined;
-  if (current?.publicKey === publicKey && JSON.stringify(asPayload(current.payload)) === JSON.stringify(payload)) await chrome.storage.local.remove(key);
-  await chrome.storage.local.remove(CACHE_KEY);
-  // The popup/side panel may already be open with an older history snapshot.
-  await chrome.runtime.sendMessage({ type: "observation-delivered" }).catch(() => undefined);
 }
 
 async function retryObservations(): Promise<void> {
+  if (observationRetry) return observationRetry;
+  const retry = retryPending().finally(() => { observationRetry = undefined; });
+  observationRetry = retry;
+  return retry;
+}
+
+async function retryPending(): Promise<void> {
   if (!(await isDisclaimerAccepted()) || !(await isCaptureEnabled())) return;
   const stored = await chrome.storage.local.get(null);
   for (const [key, value] of Object.entries(stored)) {
@@ -312,13 +330,15 @@ async function forceCreate(eventId: unknown): Promise<{ ok: true } | { ok: false
   return { ok: true };
 }
 
-async function nextHistory(value: unknown, xUserId?: unknown): Promise<{ ok: true; events: EventRow[]; nextCursor: string | null } | { ok: false }> {
+async function nextHistory(value: unknown, xUserId?: unknown, xUserIds?: unknown): Promise<{ ok: true; events: EventRow[]; nextCursor: string | null } | { ok: false }> {
   if (!(await isDisclaimerAccepted()) || typeof value !== "string" || !value) return { ok: false };
   const publicKey = await applicationPublicKey();
   const accounts = await readAccounts();
   if (!accounts.length) return { ok: false };
   if (xUserId !== undefined && (!isXUserId(xUserId) || !accounts.some((account) => account.xUserId === xUserId))) return { ok: false };
-  const response = await privateRequest("GET", `/v1/events?${query(xUserId ? [xUserId] : idsFor(accounts), value, FEED_MORE)}`);
+  const ids = xUserIds === undefined ? (xUserId ? [xUserId] : idsFor(accounts)) : validIds(xUserIds);
+  if (!ids.length || !ids.every((id) => accounts.some((account) => account.xUserId === id)) || (xUserId !== undefined && (ids.length !== 1 || ids[0] !== xUserId))) return { ok: false };
+  const response = await privateRequest("GET", `/v1/events?${query(ids, value, FEED_MORE)}`);
   if (!response.ok || publicKey !== await applicationPublicKey()) return { ok: false };
   return { ok: true, ...parseEvents(await response.json()) };
 }

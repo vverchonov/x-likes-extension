@@ -94,7 +94,7 @@ export function mountPrivateView(): void {
 }
 
 function refreshAfterDelivery(): void {
-  if (activeRefreshes) {
+  if (activeRefreshes || historyLoading) {
     refreshPending = true;
     return;
   }
@@ -102,7 +102,7 @@ function refreshAfterDelivery(): void {
 }
 
 export async function refreshPrivateView(force: boolean, quiet = false): Promise<void> {
-  if (quiet && (activeRefreshes || !snapshot)) return;
+  if (quiet && (activeRefreshes || historyLoading || !snapshot)) return;
   const id = ++refreshId;
   const oldestVisibleId = quiet ? snapshot?.events?.at(-1)?.id : undefined;
   const timeline = document.querySelector("#timeline");
@@ -144,7 +144,7 @@ export async function refreshPrivateView(force: boolean, quiet = false): Promise
     if (quiet && !history && !balances && !capacity && !statistics && !verification) return;
     if (quiet && history) {
       while (history.nextCursor && oldestVisibleId && !history.events.some((event) => event.id === oldestVisibleId)) {
-        const page: unknown = await chrome.runtime.sendMessage({ type: "history-next", cursor: history.nextCursor });
+        const page: unknown = await chrome.runtime.sendMessage({ type: "history-next", cursor: history.nextCursor, xUserIds: accountsList.map((account) => account.xUserId) });
         if (!page || typeof page !== "object" || (page as { ok?: unknown }).ok !== true) return;
         const next = parseEvents(page);
         history.events.push(...next.events);
@@ -154,7 +154,7 @@ export async function refreshPrivateView(force: boolean, quiet = false): Promise
     if (id !== refreshId) return;
     const previous = snapshot;
     const events = history?.events ?? (quiet ? previous?.events ?? null : null);
-    snapshot = { accounts: accountsList, events, nextCursor: history?.nextCursor ?? (quiet ? previous?.nextCursor ?? null : null), balances: quiet ? balances ?? previous?.balances ?? null : balances, capacity: quiet ? capacity ?? previous?.capacity ?? null : capacity, statistics: quiet ? statistics ?? previous?.statistics ?? null : statistics, verification: quiet ? verification ?? previous?.verification ?? null : verification };
+    snapshot = { accounts: accountsList, events, nextCursor: history ? history.nextCursor : (quiet ? previous?.nextCursor ?? null : null), balances: quiet ? balances ?? previous?.balances ?? null : balances, capacity: quiet ? capacity ?? previous?.capacity ?? null : capacity, statistics: quiet ? statistics ?? previous?.statistics ?? null : statistics, verification: quiet ? verification ?? previous?.verification ?? null : verification };
     cursor = snapshot.nextCursor;
     if (!quiet) selected = null;
     paintAllAccounts();
@@ -170,6 +170,7 @@ export async function refreshPrivateView(force: boolean, quiet = false): Promise
     paintAllAccounts();
   } finally {
     activeRefreshes--;
+    watchFeedEnd();
     if (id === refreshId && !quiet && refresh instanceof HTMLButtonElement) refresh.disabled = false;
     if (!activeRefreshes && refreshPending) {
       refreshPending = false;
@@ -424,7 +425,7 @@ function paintHistory(events: EventRow[] | null): void {
       }
     }
     meta.append(links);
-    const statusText = activityStatus(event.processingStatus);
+    const statusText = activityStatus(event.processingStatus, event.failureReason);
     if (statusText) {
       const status = document.createElement("p");
       status.className = "activity-status";
@@ -462,7 +463,7 @@ function paintHistory(events: EventRow[] | null): void {
 
 function watchFeedEnd(): void {
   feedObserver?.disconnect();
-  if (!cursor || historyLoading || historyError) return;
+  if (!cursor || activeRefreshes || historyLoading || historyError) return;
   const timeline = document.querySelector("#timeline");
   const last = timeline?.querySelector(".post:last-of-type");
   if (!(timeline instanceof HTMLElement) || !(last instanceof HTMLElement)) return;
@@ -544,10 +545,21 @@ function restoreTimelineAnchor(anchor: { id: string; offset: number } | null): v
   root.scrollTop += post.getBoundingClientRect().top - root.getBoundingClientRect().top - anchor.offset;
 }
 
-function activityStatus(status: EventRow["processingStatus"]): string | null {
+function activityStatus(status: EventRow["processingStatus"], reason: EventRow["failureReason"] = null): string | null {
+  if (["source_unresolved", "packaging_failed", "failed"].includes(status)) {
+    switch (reason) {
+      case "processing_limit": return "Processing reached its time or budget limit. No coin was created.";
+      case "source_image_unavailable": return "Couldn't retrieve the original image. No coin was created.";
+      case "image_provider_failed": return "The image provider failed. No coin was created.";
+      case "image_plan_failed": return "The image plan couldn't preserve the source. No coin was created.";
+      case "image_review_failed": return "The image didn't pass the final review. No coin was created.";
+      case "metadata_failed": return "Couldn't complete the coin's name or description. No coin was created.";
+    }
+  }
   switch (status) {
     case "finalized": return null;
     case "already_claimed": return "Already submitted";
+    case "post_unavailable": return "This post is no longer available on X.";
     case "source_unresolved":
     case "packaging_failed":
     case "failed": return "Something went wrong. No coin was created.";
@@ -556,6 +568,8 @@ function activityStatus(status: EventRow["processingStatus"]): string | null {
     case "creative_rejected":
     case "rejected": return "No coin was created automatically.";
     case "deferred": return "Queued";
+    case "retrying": return "Processing hit a temporary error. Queued for retry.";
+    case "processing_paused": return "Processing paused at its resource limit.";
     case "pending":
     case "grounding":
     case "filtering":
@@ -569,7 +583,7 @@ function activityStatus(status: EventRow["processingStatus"]): string | null {
 
 async function loadMore(): Promise<void> {
   const page = cursor;
-  if (!page || !snapshot || historyLoading) return;
+  if (!page || !snapshot || activeRefreshes || historyLoading) return;
   const requestedRefresh = refreshId;
   historyLoading = true;
   historyError = false;
@@ -580,11 +594,12 @@ async function loadMore(): Promise<void> {
     paintFeedMore(timeline);
   }
   try {
-    const response: unknown = await chrome.runtime.sendMessage({ type: "history-next", cursor: page });
+    const response: unknown = await chrome.runtime.sendMessage({ type: "history-next", cursor: page, xUserIds: snapshot.accounts.map((account) => account.xUserId) });
     if (!snapshot || refreshId !== requestedRefresh || cursor !== page || !response || typeof response !== "object" || (response as { ok?: unknown }).ok !== true) throw new Error("History unavailable");
     const history = parseEvents(response);
     if (!snapshot.events) throw new Error("History unavailable");
-    snapshot.events.push(...history.events);
+    const existing = new Set(snapshot.events.map((event) => event.id));
+    snapshot.events.push(...history.events.filter((event) => !existing.has(event.id)));
     cursor = history.nextCursor;
     snapshot.nextCursor = history.nextCursor;
     historyLoading = false;
@@ -600,7 +615,12 @@ async function loadMore(): Promise<void> {
       }
     }
   } finally {
-    if (refreshId === requestedRefresh) historyLoading = false;
+    historyLoading = false;
+    watchFeedEnd();
+    if (!activeRefreshes && refreshPending) {
+      refreshPending = false;
+      refreshAfterDelivery();
+    }
   }
 }
 

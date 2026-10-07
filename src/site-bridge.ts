@@ -5,12 +5,12 @@ if (document.documentElement) document.documentElement.dataset.scrollx = "1";
 
 window.addEventListener("message", (event: MessageEvent) => {
   if (event.source !== window || event.origin !== location.origin) return;
-  const data = event.data as { source?: unknown; id?: unknown; type?: unknown; force?: unknown; cursor?: unknown; xUserId?: unknown } | null;
+  const data = event.data as { source?: unknown; id?: unknown; type?: unknown; force?: unknown; cursor?: unknown; xUserId?: unknown; xUserIds?: unknown } | null;
   if (!data || data.source !== PAGE || typeof data.id !== "string" || data.id.length === 0 || data.id.length > 64 || typeof data.type !== "string") return;
-  void respond(data.id, { type: data.type, force: data.force, cursor: data.cursor, xUserId: data.xUserId });
+  void respond(data.id, { type: data.type, force: data.force, cursor: data.cursor, xUserId: data.xUserId, xUserIds: data.xUserIds });
 });
 
-async function respond(id: string, data: { type: string; force?: unknown; cursor?: unknown; xUserId?: unknown }): Promise<void> {
+async function respond(id: string, data: { type: string; force?: unknown; cursor?: unknown; xUserId?: unknown; xUserIds?: unknown }): Promise<void> {
   if (data.type === "ping") {
     post(id, { type: "pong" });
     return;
@@ -22,7 +22,7 @@ async function respond(id: string, data: { type: string; force?: unknown; cursor
       return;
     }
     if (data.type === "feed-more") {
-      const result: unknown = await chrome.runtime.sendMessage({ type: "history-next", cursor: data.cursor, xUserId: data.xUserId });
+      const result: unknown = await chrome.runtime.sendMessage({ type: "history-next", cursor: data.cursor, xUserId: data.xUserId, xUserIds: data.xUserIds });
       post(id, { result });
     }
   } catch {

@@ -226,6 +226,13 @@ function watchSignedInAccount(): void {
     if (!hasActiveContext()) return;
     const account = currentAccount();
     if (!account?.xUserId) return;
+    // Cookie resolution can arrive without another page-hook account message.
+    for (let i = 0; i < pendingEngagements.length;) {
+      const pending = pendingEngagements[i]!;
+      if (pending.username.toLowerCase() !== account.username.toLowerCase()) { i++; continue; }
+      pendingEngagements.splice(i, 1);
+      void sendEngagedPost(pending.engagement, { username: pending.username, avatarUrl: pending.avatarUrl, xUserId: account.xUserId }).catch(onCaptureError);
+    }
     const key = `${account.xUserId}:${account.username}`;
     if (key === reported) return;
     reported = key;
