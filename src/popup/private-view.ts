@@ -488,7 +488,7 @@ function paintFeedMore(root: HTMLElement): void {
 }
 
 function forceQuota(event: EventRow): { used: number; limit: number } | null {
-  if (!event.canForceCreate || event.processingStatus !== "creative_rejected" || !event.intentId) return null;
+  if (!event.canForceCreate || !["creative_rejected", "policy_unresolved"].includes(event.processingStatus) || !event.intentId) return null;
   const quota = snapshot?.capacity?.find((entry) => entry.xUserId === event.xUserId);
   return quota ?? null;
 }
@@ -548,6 +548,7 @@ function activityStatus(status: EventRow["processingStatus"]): string | null {
   switch (status) {
     case "finalized": return null;
     case "already_claimed": return "Already submitted";
+    case "policy_unresolved": return "Policy review uncertain";
     case "source_unresolved":
     case "packaging_failed":
     case "failed": return "Couldn't create coin";

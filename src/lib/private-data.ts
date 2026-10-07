@@ -8,7 +8,7 @@ export type LaunchCapacity = { xUserId: string; used: number; limit: number };
 export type AccountStatistics = { xUserId: string; engagements: number; tokensCreated: number; attributedRewardsLamports: string };
 export type VerificationStatus = "none" | "self" | "other";
 export type AccountVerification = { xUserId: string; status: VerificationStatus };
-export type ProcessingStatus = "already_claimed" | "pending" | "deferred" | "grounding" | "source_unresolved" | "filtering" | "blocked" | "creative_rejected" | "rejected" | "generating" | "packaging_failed" | "ready" | "sending" | "unresolved" | "finalized" | "failed";
+export type ProcessingStatus = "already_claimed" | "pending" | "deferred" | "grounding" | "source_unresolved" | "policy_unresolved" | "filtering" | "blocked" | "creative_rejected" | "rejected" | "generating" | "packaging_failed" | "ready" | "sending" | "unresolved" | "finalized" | "failed";
 export type EventRow = LikedPostPayload & { id: string; xUserId: string; intentId: string | null; receivedAt: string; status: "received"; processingStatus: ProcessingStatus; canForceCreate: boolean; tokenUrl: string | null; creatorEarningsLamports: string | null };
 export type Balance = { xUserId: string; availableLamports: string; pendingLamports: string; claimedLamports: string; paused: boolean };
 export type EligibilityReason = "below_minimum" | "quote_unavailable" | "quote_stale" | "disputed" | "unauthorized";
@@ -67,11 +67,11 @@ export function parseEvents(value: unknown): { events: EventRow[]; nextCursor: s
   if (!value || typeof value !== "object") throw new Error("Invalid history");
   const { events, nextCursor } = value as { events?: unknown; nextCursor?: unknown };
   if (!Array.isArray(events) || !(nextCursor === null || typeof nextCursor === "string" && nextCursor.length > 0)) throw new Error("Invalid history");
-  const statuses: ProcessingStatus[] = ["already_claimed", "pending", "deferred", "grounding", "source_unresolved", "filtering", "blocked", "creative_rejected", "rejected", "generating", "packaging_failed", "ready", "sending", "unresolved", "finalized", "failed"];
+  const statuses: ProcessingStatus[] = ["already_claimed", "pending", "deferred", "grounding", "source_unresolved", "policy_unresolved", "filtering", "blocked", "creative_rejected", "rejected", "generating", "packaging_failed", "ready", "sending", "unresolved", "finalized", "failed"];
   const rows = events.map((item) => {
     const post = parseLikedPost(item);
     const row = item as Partial<EventRow>;
-    if (!post || !isXUserId(row.xUserId) || typeof row.id !== "string" || !(typeof row.intentId === "string" || (row.intentId === null && row.processingStatus === "already_claimed")) || (row.intentId !== null && row.processingStatus === "already_claimed") || typeof row.receivedAt !== "string" || row.status !== "received" || !statuses.includes(row.processingStatus as ProcessingStatus) || typeof row.canForceCreate !== "boolean" || (row.canForceCreate && (row.processingStatus !== "creative_rejected" || typeof row.intentId !== "string")) || !(row.tokenUrl === null || typeof row.tokenUrl === "string") || (row.processingStatus === "finalized" ? !lamports(row.creatorEarningsLamports) : row.creatorEarningsLamports !== null)) throw new Error("Invalid history row");
+    if (!post || !isXUserId(row.xUserId) || typeof row.id !== "string" || !(typeof row.intentId === "string" || (row.intentId === null && row.processingStatus === "already_claimed")) || (row.intentId !== null && row.processingStatus === "already_claimed") || typeof row.receivedAt !== "string" || row.status !== "received" || !statuses.includes(row.processingStatus as ProcessingStatus) || typeof row.canForceCreate !== "boolean" || (row.canForceCreate && (!["creative_rejected", "policy_unresolved"].includes(row.processingStatus as string) || typeof row.intentId !== "string")) || !(row.tokenUrl === null || typeof row.tokenUrl === "string") || (row.processingStatus === "finalized" ? !lamports(row.creatorEarningsLamports) : row.creatorEarningsLamports !== null)) throw new Error("Invalid history row");
     let tokenUrl: string | null = null;
     if ((row.processingStatus === "finalized" || row.processingStatus === "already_claimed") && row.tokenUrl) {
       const url = new URL(row.tokenUrl);
