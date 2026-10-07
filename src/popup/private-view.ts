@@ -549,9 +549,9 @@ function activityStatus(status: EventRow["processingStatus"]): string | null {
     case "finalized": return null;
     case "already_claimed": return "Already submitted";
     case "policy_unresolved": return "Policy review uncertain";
-    case "source_unresolved":
-    case "packaging_failed":
-    case "failed": return "Couldn't create coin";
+    case "source_unresolved": return "Post review incomplete";
+    case "packaging_failed": return "Coin preparation incomplete";
+    case "failed": return "Creation interrupted";
     case "blocked": return "Not eligible";
     case "creative_rejected":
     case "rejected": return "Not selected";
