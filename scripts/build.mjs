@@ -65,7 +65,7 @@ const manifest = {
       run_at: "document_start",
     },
     {
-      matches: [...siteOrigins.map((origin) => `${origin}/*`), "http://localhost/*", "http://127.0.0.1/*"],
+      matches: siteOrigins.map((origin) => `${origin}/*`),
       js: ["site-bridge.js"],
       run_at: "document_start",
     },

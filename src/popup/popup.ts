@@ -1,5 +1,5 @@
 import { X_PROFILE_URL, WEBSITE_URL } from "../config.ts";
-import { acceptDisclaimer, isDisclaimerAccepted, isSetupReadySeen, markSetupReadySeen } from "../lib/consent.ts";
+import { acceptDisclaimer, isDisclaimerAccepted } from "../lib/consent.ts";
 import { formatSol } from "../lib/private-data.ts";
 import { isSolanaAddress } from "../lib/solana.ts";
 import { allAccountsSelection, clearClaimHistory, currentSelection, mountPrivateView, noteVerification, refreshClaimHistory, refreshClaimStatus, refreshPrivateView, revealFeed, rowSelection, selectClaim, setClaim } from "./private-view.ts";
@@ -46,9 +46,7 @@ if (docsLink instanceof HTMLAnchorElement) docsLink.href = new URL("/docs", WEBS
 
 const disclaimerAgree = document.querySelector("#disclaimer-agree");
 const disclaimerContinue = document.querySelector("#disclaimer-continue");
-const readyContinue = document.querySelector("#ready-continue");
 let opened = false;
-let readyBound = false;
 
 void openPopup();
 void prepareDock();
@@ -86,8 +84,7 @@ async function browserWindow(): Promise<number | null> {
 
 async function openPopup(): Promise<void> {
   if (await isDisclaimerAccepted()) {
-    if (await isSetupReadySeen()) unlockApp();
-    else showReady();
+    unlockApp();
     return;
   }
   if (!(disclaimerAgree instanceof HTMLInputElement) || !(disclaimerContinue instanceof HTMLButtonElement)) return;
@@ -97,19 +94,7 @@ async function openPopup(): Promise<void> {
   disclaimerContinue.addEventListener("click", () => {
     if (!disclaimerAgree.checked) return;
     disclaimerContinue.disabled = true;
-    void acceptDisclaimer().then(() => {
-      showReady();
-    });
-  });
-}
-
-function showReady(): void {
-  document.body.classList.add("is-ready");
-  if (!(readyContinue instanceof HTMLButtonElement) || readyBound) return;
-  readyBound = true;
-  readyContinue.addEventListener("click", () => {
-    readyContinue.disabled = true;
-    void markSetupReadySeen().then(() => unlockApp());
+    void acceptDisclaimer().then(() => unlockApp());
   });
 }
 

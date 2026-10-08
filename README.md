@@ -1,34 +1,44 @@
-# ScrollX extension
+<p align="center">
+  <img src="icons/icon128.png" alt="" width="96" height="96" />
+</p>
 
-Chrome and Brave extension for observing likes, reposts and comments on original X posts. One Manifest V3 package is written to `dist/chrome` and `dist/brave`.
+<h1 align="center">ScrollX</h1>
 
-The first time the popup opens, it asks for consent and links to the rules at `{WEBSITE_URL}/docs` before observing X requests or tracking accounts. After consent, successful likes, reposts and comments on x.com are attributed to an observed numeric X account ID and sent as original-post observations while capture is enabled. A reply to a comment under a post resolves to the original post; if the original cannot be resolved, delivery is withheld. Unlikes and removing reposts are ignored. The popup shows cursor-paginated private history for all tracked accounts or one selected account, per-token creator rewards attributed to the reported X ID, and separate server-authorized SOL-backed balances displayed in USD, eligibility and SOL claim status. Attributed rewards may not be claimable by the submitting key after a dispute. Removing an account changes the local view, not its backend history.
+<p align="center">
+  Turn your X activity into new coins.
+</p>
 
-The background worker owns an exportable Ed25519 application key in extension IndexedDB. Reveal and copy its private key string in settings to restore the same backend identity (and tracked account selection) after reinstalling or moving browsers; paste the string to import it. Older JSON backups can also be pasted. The private key and session never enter the X page or content script. This key is not a Solana wallet. Claims require a separately entered and confirmed Solana destination; an accepted claim is pending until confirmed by the backend. No X cookies are sent to the backend.
+<p align="center">
+  <a href="https://chromewebstore.google.com/detail/scrollx/ckgckdlkncjogodfjpegifcjhdcifbcp">Install</a>
+  ·
+  <a href="https://www.scrollx.app/">Website</a>
+  ·
+  <a href="https://x.com/scrollxsol">X</a>
+</p>
 
-The request and response contract is in [BACKEND.md](BACKEND.md).
+ScrollX is a free Chrome extension. Scroll X the way you already do. Like, reply, or repost a post, and ScrollX can turn that post into a coin. No forms to fill in, and no extra sign-up inside the extension.
 
-## Setup
+You earn **75% of the fees** that coin generates. Rewards show up in the ScrollX popup, and you claim them from there.
 
-```bash
-cd x-ext
-cp .env.example .env
-npm install
-npm test
-npm run typecheck
-npm run build
-```
+## Get ScrollX
 
-Set these in `.env` or supply them as environment variables to `npm run build` (environment variables take precedence):
+Install ScrollX from the Chrome Web Store:
 
-- `BE_ENDPOINT` — backend `/v1/events` URL (the extension uses its origin for signed auth, history and rewards requests)
-- `X_PROFILE_URL` — link shown in the popup
-- `WEBSITE_URL` — link shown in the popup
+[https://chromewebstore.google.com/detail/scrollx/ckgckdlkncjogodfjpegifcjhdcifbcp](https://chromewebstore.google.com/detail/scrollx/ckgckdlkncjogodfjpegifcjhdcifbcp)
 
-The manifest `homepage_url` uses the website origin; data-use disclosures for the Chrome Web Store are entered in the store dashboard.
+The same listing works in Brave.
 
-## Load
+## How it works
 
-Chrome: open `chrome://extensions`, turn on Developer mode, choose Load unpacked, and select `dist/chrome`.
+1. Install ScrollX.
+2. Use X as usual. Scroll, like, reply, or repost.
+3. ScrollX can create a coin from the post you interacted with.
+4. You earn your share of the fees that coin generates.
 
-Brave: open `brave://extensions`, turn on Developer mode, choose Load unpacked, and select `dist/brave`.
+An interaction does not guarantee a coin or a reward. Full details are on the site: [How ScrollX works](https://www.scrollx.app/docs).
+
+## Links
+
+- Website: [https://www.scrollx.app/](https://www.scrollx.app/)
+- X: [https://x.com/scrollxsol](https://x.com/scrollxsol)
+- Chrome Web Store: [https://chromewebstore.google.com/detail/scrollx/ckgckdlkncjogodfjpegifcjhdcifbcp](https://chromewebstore.google.com/detail/scrollx/ckgckdlkncjogodfjpegifcjhdcifbcp)

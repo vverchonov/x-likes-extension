@@ -82,6 +82,9 @@ export function mountPrivateView(): void {
     void refreshPrivateView(true);
     void refreshClaimHistory().then(() => refreshClaimStatus());
   });
+  document.querySelector("#open-x")?.addEventListener("click", () => {
+    void chrome.tabs.create({ url: "https://x.com" });
+  });
   document.querySelector("#activity-more")?.addEventListener("click", () => { void loadMoreClaims(); });
   void refreshPrivateView(true);
   void refreshClaimHistory().then(() => refreshClaimStatus());
@@ -127,9 +130,13 @@ export async function refreshPrivateView(force: boolean, quiet = false): Promise
       cursor = null;
       selected = null;
       const saved = trackedAccounts(response.accounts);
+      const noAccounts = response.reason === "no-account" && saved.length === 0;
+      paintAccountsStart(noAccounts);
       paintMessage(timeline, response.reason === "no-account" ? "Open X to load engagements" : "Failed to load");
-      paintMessage(accounts, response.reason === "no-account" ? "No accounts yet" : "Couldn't load accounts or balances");
-      if (saved.length) paintAccounts(saved, null);
+      if (!noAccounts) {
+        paintMessage(accounts, "Couldn't load accounts or balances");
+        if (saved.length) paintAccounts(saved, null);
+      }
       paintAllAccounts();
       return;
     }
@@ -152,6 +159,7 @@ export async function refreshPrivateView(force: boolean, quiet = false): Promise
       }
     }
     if (id !== refreshId) return;
+    paintAccountsStart(false);
     const previous = snapshot;
     const events = history?.events ?? (quiet ? previous?.events ?? null : null);
     snapshot = { accounts: accountsList, events, nextCursor: history ? history.nextCursor : (quiet ? previous?.nextCursor ?? null : null), balances: quiet ? balances ?? previous?.balances ?? null : balances, capacity: quiet ? capacity ?? previous?.capacity ?? null : capacity, statistics: quiet ? statistics ?? previous?.statistics ?? null : statistics, verification: quiet ? verification ?? previous?.verification ?? null : verification };
@@ -165,6 +173,7 @@ export async function refreshPrivateView(force: boolean, quiet = false): Promise
     if (quiet) return;
     snapshot = null;
     cursor = null;
+    paintAccountsStart(false);
     paintMessage(timeline, "Failed to load");
     paintMessage(accounts, "Couldn't load accounts or balances");
     paintAllAccounts();
@@ -231,6 +240,17 @@ function eligibilityText(balances: Balances): string {
     case "quote_stale": return "Updating SOL price; try soon";
     default: return "Claim unavailable";
   }
+}
+
+function paintAccountsStart(show: boolean): void {
+  const start = document.querySelector("#accounts-start");
+  const total = document.querySelector(".accounts-total");
+  const eligibility = document.querySelector("#claim-eligibility");
+  const list = document.querySelector("#accounts-list");
+  if (start instanceof HTMLElement) start.hidden = !show;
+  if (total instanceof HTMLElement) total.hidden = show;
+  if (eligibility instanceof HTMLElement) eligibility.hidden = show;
+  if (list instanceof HTMLElement) list.hidden = show;
 }
 
 function paintAllAccounts(): void {

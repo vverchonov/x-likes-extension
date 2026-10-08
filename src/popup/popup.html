@@ -46,20 +46,26 @@
         <button id="disclaimer-continue" type="button" disabled>Continue</button>
       </div>
     </section>
-    <section id="ready" class="ready">
-      <div class="ready-body">
-        <h1>You're all set</h1>
-        <p>You can use X as always. We'll automatically create coins based on your activity.</p>
-        <p>Your profiles will be displayed on the home screen when the first activity from X starts.</p>
-      </div>
-      <div class="ready-nav">
-        <button id="ready-continue" type="button">Continue</button>
-      </div>
-    </section>
     <div id="home" class="home" hidden>
     <main id="timeline" class="timeline"></main>
     </div>
     <section id="accounts" class="accounts">
+      <section id="accounts-start" class="accounts-start" hidden>
+        <div class="accounts-start-body">
+          <svg class="accounts-start-icon" viewBox="0 0 24 24" width="40" height="40" aria-hidden="true">
+            <path fill="currentColor" d="M12 6V3L8 7l4 4V8c2.76 0 5 2.24 5 5 0 .65-.13 1.26-.36 1.83l1.46 1.46A6.96 6.96 0 0 0 19 13c0-3.87-3.13-7-7-7zm0 10c-2.76 0-5-2.24-5-5 0-.65.13-1.26.36-1.83L5.9 7.71A6.96 6.96 0 0 0 5 13c0 3.87 3.13 7 7 7v3l4-4-4-4v3z" />
+          </svg>
+          <h1>Open X to get started</h1>
+          <p class="accounts-start-lead">Already have X open?<br /><strong>Refresh the page.</strong></p>
+          <p class="accounts-start-note">ScrollX will connect automatically.</p>
+          <button id="open-x" type="button">
+            Open X
+            <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+              <path fill="currentColor" d="M19 19H5V5h7V3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z" />
+            </svg>
+          </button>
+        </div>
+      </section>
       <section class="accounts-total" aria-label="All accounts">
         <p id="accounts-total" class="accounts-total-balance">– USD</p>
         <span class="claim-wrap">

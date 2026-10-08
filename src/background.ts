@@ -167,7 +167,6 @@ function isSiteSender(sender: chrome.runtime.MessageSender): boolean {
   } catch {
     return false;
   }
-  if (url.protocol === "http:" && (url.hostname === "localhost" || url.hostname === "127.0.0.1")) return true;
   return SITE_ORIGINS.includes(url.origin);
 }
 
