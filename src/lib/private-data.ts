@@ -64,10 +64,10 @@ export function parseAccountStatistics(value: unknown): AccountStatistics[] {
   });
 }
 
-export function parseEvents(value: unknown): { events: EventRow[]; nextCursor: string | null } {
+export function parseEvents(value: unknown): { events: EventRow[]; nextCursor: string | null; total: number | null } {
   if (!value || typeof value !== "object") throw new Error("Invalid history");
-  const { events, nextCursor } = value as { events?: unknown; nextCursor?: unknown };
-  if (!Array.isArray(events) || !(nextCursor === null || typeof nextCursor === "string" && nextCursor.length > 0)) throw new Error("Invalid history");
+  const { events, nextCursor, total } = value as { events?: unknown; nextCursor?: unknown; total?: unknown };
+  if (!Array.isArray(events) || !(nextCursor === null || typeof nextCursor === "string" && nextCursor.length > 0) || !(total === undefined || total === null || typeof total === "number" && Number.isSafeInteger(total) && total >= 0)) throw new Error("Invalid history");
   const statuses: ProcessingStatus[] = ["already_claimed", "pending", "deferred", "retrying", "processing_paused", "grounding", "post_unavailable", "source_unresolved", "policy_unresolved", "filtering", "blocked", "creative_rejected", "rejected", "generating", "packaging_failed", "ready", "sending", "unresolved", "finalized", "failed"];
   const rows = events.map((item) => {
     const post = parseLikedPost(item);
@@ -82,7 +82,7 @@ export function parseEvents(value: unknown): { events: EventRow[]; nextCursor: s
     }
     return { ...post, id: row.id, xUserId: row.xUserId, intentId: row.intentId, receivedAt: row.receivedAt, status: "received" as const, processingStatus: row.processingStatus as ProcessingStatus, ...(row.failureReason !== undefined ? { failureReason: row.failureReason } : {}), canForceCreate: row.canForceCreate, tokenUrl, creatorEarningsLamports: row.creatorEarningsLamports ?? null };
   });
-  return { events: rows, nextCursor };
+  return { events: rows, nextCursor, total: typeof total === "number" ? total : null };
 }
 
 function lamports(value: unknown): value is string {

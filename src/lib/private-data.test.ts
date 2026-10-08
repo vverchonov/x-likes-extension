@@ -19,7 +19,9 @@ describe("private backend contract", () => {
     assert.equal(parseEvents({ events: [claimed], nextCursor: null }).events[0]?.tokenUrl, null);
     assert.throws(() => parseEvents({ events: [{ ...claimed, tokenUrl: "http://pump.fun/coin/mint" }], nextCursor: null }));
     assert.equal(formatSol("12345678901234567890"), "12345678901.23456789 SOL");
-    assert.deepEqual(parseEvents({ events: [], nextCursor: null }), { events: [], nextCursor: null });
+    assert.deepEqual(parseEvents({ events: [], nextCursor: null }), { events: [], nextCursor: null, total: null });
+    assert.equal(parseEvents({ events: [], nextCursor: null, total: 12 }).total, 12);
+    assert.throws(() => parseEvents({ events: [], nextCursor: null, total: -1 }));
     assert.throws(() => parseEvents({ events: [{ ...row, xUserId: "alice" }], nextCursor: null }));
     assert.throws(() => parseEvents({ events: [{ ...row, canForceCreate: true }], nextCursor: null }));
     assert.throws(() => parseEvents({ events: [{ ...row, processingStatus: "rejected", canForceCreate: "yes" }], nextCursor: null }));

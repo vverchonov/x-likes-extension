@@ -17,7 +17,7 @@ const PENDING_PREFIX = "pendingObservation:";
 const CACHE_MS = 60_000;
 const OBSERVATION_RETRY_ALARM = "retry-observations";
 type SignedObservation = LikedPostPayload & { xUserId: string };
-type Snapshot = { publicKey: string; accounts: TrackedAccount[]; historyIds: string[]; events: EventRow[] | null; nextCursor: string | null; balances: Balances | null; capacity: LaunchCapacity[] | null; statistics: AccountStatistics[] | null; verification: AccountVerification[] | null; fetchedAt: number };
+type Snapshot = { publicKey: string; accounts: TrackedAccount[]; historyIds: string[]; events: EventRow[] | null; nextCursor: string | null; total: number | null; balances: Balances | null; capacity: LaunchCapacity[] | null; statistics: AccountStatistics[] | null; verification: AccountVerification[] | null; fetchedAt: number };
 let claimInFlight: Promise<unknown> = Promise.resolve();
 let accountUpdates: Promise<unknown> = Promise.resolve();
 let observationUpdates: Promise<unknown> = Promise.resolve();
@@ -80,7 +80,7 @@ chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) =>
     }
     if (message && typeof message === "object" && (message as { type?: unknown }).type === "history-next") {
       const page = message as { cursor?: unknown; xUserId?: unknown; xUserIds?: unknown };
-      void nextHistory(page.cursor, page.xUserId, page.xUserIds).then((response) => sendResponse(response)).catch(() => sendResponse({ ok: false }));
+      void nextHistory(page.cursor, page.xUserId, page.xUserIds, FEED_PAGE).then((response) => sendResponse(response)).catch(() => sendResponse({ ok: false }));
       return true;
     }
     return;
@@ -295,7 +295,7 @@ async function loadData(force: boolean, xUserId?: string): Promise<{ ok: true; d
   if (!force && cached && cached.publicKey === publicKey && Date.now() - cached.fetchedAt < CACHE_MS && Array.isArray(cached.verification) && JSON.stringify(ids) === JSON.stringify(idsFor(trackedAccounts(cached.accounts))) && JSON.stringify(historyIds) === JSON.stringify(cached.historyIds)) {
     try {
       if (publicKey !== await applicationPublicKey()) throw new Error("Identity changed during history read");
-      return { ok: true, data: { ...cached, accounts, ...(cached.events === null ? {} : parseEvents({ events: cached.events, nextCursor: cached.nextCursor })), balances: cached.balances === null ? null : parseBalances(cached.balances), capacity: cached.capacity == null ? null : parseLaunchCapacity({ accounts: cached.capacity }), statistics: cached.statistics == null ? null : parseAccountStatistics({ accounts: cached.statistics }), verification: parseVerification({ accounts: cached.verification }) } };
+      return { ok: true, data: { ...cached, accounts, ...(cached.events === null ? {} : parseEvents({ events: cached.events, nextCursor: cached.nextCursor, total: cached.total })), balances: cached.balances === null ? null : parseBalances(cached.balances), capacity: cached.capacity == null ? null : parseLaunchCapacity({ accounts: cached.capacity }), statistics: cached.statistics == null ? null : parseAccountStatistics({ accounts: cached.statistics }), verification: parseVerification({ accounts: cached.verification }) } };
     } catch { /* Fetch fresh data. */ }
   }
   try {
@@ -308,7 +308,7 @@ async function loadData(force: boolean, xUserId?: string): Promise<{ ok: true; d
       privateRequest("GET", `/v1/x/verification?xUserIds=${ids.join(",")}`).then(async (response) => response.ok ? parseVerification(await response.json()) : null).catch(() => null),
     ]);
     if (publicKey !== await applicationPublicKey()) throw new Error("Identity changed during history read");
-    const data = { publicKey, accounts, historyIds, events: history?.events ?? null, nextCursor: history?.nextCursor ?? null, balances, capacity, statistics, verification, fetchedAt: Date.now() };
+    const data = { publicKey, accounts, historyIds, events: history?.events ?? null, nextCursor: history?.nextCursor ?? null, total: history?.total ?? null, balances, capacity, statistics, verification, fetchedAt: Date.now() };
     if (history && balances && capacity && statistics && verification) await chrome.storage.local.set({ [CACHE_KEY]: data });
     return { ok: true, data };
   } catch (error) {
@@ -330,7 +330,7 @@ async function forceCreate(eventId: unknown): Promise<{ ok: true } | { ok: false
   return { ok: true };
 }
 
-async function nextHistory(value: unknown, xUserId?: unknown, xUserIds?: unknown): Promise<{ ok: true; events: EventRow[]; nextCursor: string | null } | { ok: false }> {
+async function nextHistory(value: unknown, xUserId?: unknown, xUserIds?: unknown, limit = FEED_MORE): Promise<{ ok: true; events: EventRow[]; nextCursor: string | null; total: number | null } | { ok: false }> {
   if (!(await isDisclaimerAccepted()) || typeof value !== "string" || !value) return { ok: false };
   const publicKey = await applicationPublicKey();
   const accounts = await readAccounts();
@@ -338,7 +338,7 @@ async function nextHistory(value: unknown, xUserId?: unknown, xUserIds?: unknown
   if (xUserId !== undefined && (!isXUserId(xUserId) || !accounts.some((account) => account.xUserId === xUserId))) return { ok: false };
   const ids = xUserIds === undefined ? (xUserId ? [xUserId] : idsFor(accounts)) : validIds(xUserIds);
   if (!ids.length || !ids.every((id) => accounts.some((account) => account.xUserId === id)) || (xUserId !== undefined && (ids.length !== 1 || ids[0] !== xUserId))) return { ok: false };
-  const response = await privateRequest("GET", `/v1/events?${query(ids, value, FEED_MORE)}`);
+  const response = await privateRequest("GET", `/v1/events?${query(ids, value, limit)}`);
   if (!response.ok || publicKey !== await applicationPublicKey()) return { ok: false };
   return { ok: true, ...parseEvents(await response.json()) };
 }
