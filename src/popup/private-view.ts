@@ -30,8 +30,12 @@ export function noteVerification(xUserId: string, message: string): void {
 }
 export function currentSelection(): Selection | null { return selected; }
 export function allAccountsSelection(): Selection | null {
-  if (!snapshot?.balances || snapshot.balances.accounts.length !== snapshot.accounts.length || !snapshot.balances.claimEligibility.available || snapshot.balances.accounts.some((account) => account.paused)) return null;
-  return { xUserIds: snapshot.accounts.map((account) => account.xUserId), balance: snapshot.balances.combined.availableLamports };
+  const balances = snapshot?.balances;
+  if (!balances) return null;
+  const eligible = balances.accounts.filter((account) => rowSelection(account.xUserId) !== null && aboveMinimum(account.availableLamports, balances.claimEligibility.solUsd));
+  if (!eligible.length) return null;
+  const balance = eligible.reduce((sum, account) => sum + BigInt(account.availableLamports), 0n).toString();
+  return { xUserIds: eligible.map((account) => account.xUserId), balance };
 }
 export function rowSelection(id: string): Selection | null {
   const account = snapshot?.balances?.accounts.find((entry) => entry.xUserId === id);
@@ -216,6 +220,12 @@ function isCombinedMinimumBlock(balances: Balances | null): boolean {
   return reason !== "quote_unavailable" && reason !== "quote_stale";
 }
 
+function positiveBalance(lamports: string, quote: string | null): boolean {
+  if (!/^\d+$/.test(lamports) || BigInt(lamports) <= 0n) return false;
+  const usd = formatUsd(lamports, quote);
+  return usd !== null && usd !== "$0.00";
+}
+
 function availableUsd(lamports: string, quote: string | null): string {
   const usd = formatUsd(lamports, quote);
   return usd ? `${usd} available` : "USD unavailable";
@@ -265,7 +275,7 @@ function paintAllAccounts(): void {
     return;
   }
   button.hidden = false;
-  const canClaim = Boolean(allAccountsSelection() && aboveMinimum(balances.combined.availableLamports, balances.claimEligibility.solUsd));
+  const canClaim = allAccountsSelection() !== null;
   button.disabled = !canClaim;
   button.textContent = canClaim || isCombinedMinimumBlock(balances) ? "Claim all" : combinedClaimLabel(balances);
   setMinimumHint(button, !canClaim && isCombinedMinimumBlock(balances));
@@ -329,8 +339,8 @@ function paintAccounts(accounts: TrackedAccount[], balances: Balances | null): v
       verifyButton.textContent = "Verify";
       actions.append(verifyButton);
     }
-    const claimLabel = newAccount ? "Claim" : accountClaimLabel(amount, balances);
-    if (claimLabel !== "Balance unavailable") {
+    const claimLabel = accountClaimLabel(amount, balances);
+    if (amount && positiveBalance(amount.availableLamports, balances?.claimEligibility.solUsd ?? null) && claimLabel !== "Balance unavailable") {
       const claimButton = document.createElement("button");
       claimButton.className = "payout-button account-claim";
       claimButton.type = "button";
