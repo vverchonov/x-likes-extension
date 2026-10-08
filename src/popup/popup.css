@@ -45,12 +45,17 @@ body.is-locked .footer {
   display: none;
 }
 
-.disclaimer {
+.disclaimer,
+.ready {
   display: flex;
   flex: 1;
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
+}
+
+.ready {
+  display: none;
 }
 
 .disclaimer-body {
@@ -73,11 +78,34 @@ body.is-locked .footer {
   background: var(--background);
 }
 
-body:not(.is-locked) .disclaimer {
+body:not(.is-locked) .disclaimer,
+body.is-locked.is-ready .disclaimer {
   display: none;
 }
 
-.disclaimer h1 {
+body.is-locked.is-ready .ready {
+  display: flex;
+}
+
+.ready-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px 20px;
+}
+
+.ready-nav {
+  display: flex;
+  flex: 0 0 auto;
+  padding: 12px 20px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--background);
+}
+
+.disclaimer h1,
+.ready h1 {
   margin: 0;
   font-size: 20px;
   font-weight: 800;
@@ -85,7 +113,8 @@ body:not(.is-locked) .disclaimer {
 }
 
 .disclaimer p,
-.disclaimer li {
+.disclaimer li,
+.ready p {
   margin: 0;
   font-size: 15px;
   line-height: 20px;
@@ -118,7 +147,8 @@ body:not(.is-locked) .disclaimer {
   color: var(--primary);
 }
 
-#disclaimer-continue {
+#disclaimer-continue,
+#ready-continue {
   width: 100%;
   height: 48px;
   border: 0;
@@ -131,7 +161,8 @@ body:not(.is-locked) .disclaimer {
   cursor: pointer;
 }
 
-#disclaimer-continue:disabled {
+#disclaimer-continue:disabled,
+#ready-continue:disabled {
   background: var(--switch-off);
   cursor: default;
 }
