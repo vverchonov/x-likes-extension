@@ -11,126 +11,128 @@ export type AccountVerification = { xUserId: string; status: VerificationStatus 
 export type ProcessingStatus = "already_claimed" | "pending" | "deferred" | "retrying" | "processing_paused" | "grounding" | "post_unavailable" | "source_unresolved" | "policy_unresolved" | "filtering" | "blocked" | "creative_rejected" | "rejected" | "generating" | "packaging_failed" | "ready" | "sending" | "unresolved" | "finalized" | "failed";
 export type FailureReason = "processing_limit" | "source_image_unavailable" | "image_provider_failed" | "image_plan_failed" | "image_review_failed" | "metadata_failed";
 export type EventRow = LikedPostPayload & { id: string; xUserId: string; intentId: string | null; receivedAt: string; status: "received"; processingStatus: ProcessingStatus; failureReason?: FailureReason | null; canForceCreate: boolean; tokenUrl: string | null; creatorEarningsLamports: string | null };
-export type Balance = { xUserId: string; availableLamports: string; pendingLamports: string; claimedLamports: string; paused: boolean };
-export type EligibilityReason = "below_minimum" | "quote_unavailable" | "quote_stale" | "disputed" | "unauthorized";
-export type Balances = { accounts: Balance[]; combined: Omit<Balance, "xUserId" | "paused">; claimEligibility: { available: boolean; reason: EligibilityReason | null; solUsd: string | null; quoteAt: string | null } };
+export type Balance = { xUserId: string; availableLamports: string; pendingLamports: string; claimedLamports: string; blocked: boolean };
+export type EligibilityReason = "below_minimum" | "quote_unavailable" | "quote_stale" | "x_user_blocked" | "unauthorized";
+export type Balances = { accounts: Balance[]; combined: Omit<Balance, "xUserId" | "blocked">; claimEligibility: { available: boolean; reason: EligibilityReason | null; solUsd: string | null; quoteAt: string | null } };
 export type Claim = { id: string; status: "pending" | "held" | "confirmed" | "failed" | "canceled"; amountLamports: string; destination: string; transactionSignature: string | null };
 export type ClaimHistory = Claim & { createdAt: string };
 
 export function isXUserId(value: unknown): value is string {
-  return typeof value === "string" && /^[1-9][0-9]{0,19}$/.test(value);
+    return typeof value === "string" && /^[1-9][0-9]{0,19}$/.test(value);
 }
 
 export function trackedAccounts(value: unknown): TrackedAccount[] {
-  if (!Array.isArray(value)) return [];
-  const result: TrackedAccount[] = [];
-  for (const item of value) {
-    if (!item || typeof item !== "object") continue;
-    const { xUserId, username } = item as Partial<TrackedAccount>;
-    if (isXUserId(xUserId) && isLikedUsername(username) && !result.some((entry) => entry.xUserId === xUserId)) result.push({ xUserId, username });
-  }
-  return result;
+    if (!Array.isArray(value)) return [];
+    const result: TrackedAccount[] = [];
+    for (const item of value) {
+        if (!item || typeof item !== "object") continue;
+        const { xUserId, username } = item as Partial<TrackedAccount>;
+        if (isXUserId(xUserId) && isLikedUsername(username) && !result.some((entry) => entry.xUserId === xUserId)) result.push({ xUserId, username });
+    }
+    return result;
 }
 
 export function validIds(value: unknown): string[] {
-  return Array.isArray(value) && value.length <= 100 && value.every(isXUserId) && new Set(value).size === value.length ? value : [];
+    return Array.isArray(value) && value.length <= 100 && value.every(isXUserId) && new Set(value).size === value.length ? value : [];
 }
 
 export function parseLaunchCapacity(value: unknown): LaunchCapacity[] {
-  if (!value || typeof value !== "object" || !Array.isArray((value as { accounts?: unknown }).accounts)) throw new Error("Invalid launch capacity");
-  return (value as { accounts: unknown[] }).accounts.map((entry) => {
-    const row = entry as Partial<LaunchCapacity> | null;
-    if (!row || !isXUserId(row.xUserId) || !Number.isSafeInteger(row.used) || row.used! < 0 || !Number.isSafeInteger(row.limit) || row.limit! < 1) throw new Error("Invalid launch capacity");
-    return { xUserId: row.xUserId, used: row.used!, limit: row.limit! };
-  });
+    if (!value || typeof value !== "object" || !Array.isArray((value as { accounts?: unknown }).accounts)) throw new Error("Invalid launch capacity");
+    return (value as { accounts: unknown[] }).accounts.map((entry) => {
+        const row = entry as Partial<LaunchCapacity> | null;
+        if (!row || !isXUserId(row.xUserId) || !Number.isSafeInteger(row.used) || row.used! < 0 || !Number.isSafeInteger(row.limit) || row.limit! < 1) throw new Error("Invalid launch capacity");
+        return { xUserId: row.xUserId, used: row.used!, limit: row.limit! };
+    });
 }
 
 export function parseVerification(value: unknown): AccountVerification[] {
-  if (!value || typeof value !== "object" || !Array.isArray((value as { accounts?: unknown }).accounts)) throw new Error("Invalid verification");
-  const statuses = new Set<VerificationStatus>(["none", "self", "other"]);
-  return (value as { accounts: unknown[] }).accounts.map((entry) => {
-    const row = entry as Partial<AccountVerification> | null;
-    if (!row || !isXUserId(row.xUserId) || !row.status || !statuses.has(row.status)) throw new Error("Invalid verification");
-    return { xUserId: row.xUserId, status: row.status };
-  });
+    if (!value || typeof value !== "object" || !Array.isArray((value as { accounts?: unknown }).accounts)) throw new Error("Invalid verification");
+    const statuses = new Set<VerificationStatus>(["none", "self", "other"]);
+    return (value as { accounts: unknown[] }).accounts.map((entry) => {
+        const row = entry as Partial<AccountVerification> | null;
+        if (!row || !isXUserId(row.xUserId) || !row.status || !statuses.has(row.status)) throw new Error("Invalid verification");
+        return { xUserId: row.xUserId, status: row.status };
+    });
 }
 
 export function parseAccountStatistics(value: unknown): AccountStatistics[] {
-  if (!value || typeof value !== "object" || !Array.isArray((value as { accounts?: unknown }).accounts)) throw new Error("Invalid account statistics");
-  return (value as { accounts: unknown[] }).accounts.map((entry) => {
-    const row = entry as Partial<AccountStatistics> | null;
-    if (!row || !isXUserId(row.xUserId) || !Number.isSafeInteger(row.engagements) || row.engagements! < 0 || !Number.isSafeInteger(row.tokensCreated) || row.tokensCreated! < 0 || !lamports(row.attributedRewardsLamports)) throw new Error("Invalid account statistics");
-    return { xUserId: row.xUserId, engagements: row.engagements!, tokensCreated: row.tokensCreated!, attributedRewardsLamports: row.attributedRewardsLamports };
-  });
+    if (!value || typeof value !== "object" || !Array.isArray((value as { accounts?: unknown }).accounts)) throw new Error("Invalid account statistics");
+    return (value as { accounts: unknown[] }).accounts.map((entry) => {
+        const row = entry as Partial<AccountStatistics> | null;
+        if (!row || !isXUserId(row.xUserId) || !Number.isSafeInteger(row.engagements) || row.engagements! < 0 || !Number.isSafeInteger(row.tokensCreated) || row.tokensCreated! < 0 || !lamports(row.attributedRewardsLamports)) throw new Error("Invalid account statistics");
+        return { xUserId: row.xUserId, engagements: row.engagements!, tokensCreated: row.tokensCreated!, attributedRewardsLamports: row.attributedRewardsLamports };
+    });
 }
 
 export function parseEvents(value: unknown): { events: EventRow[]; nextCursor: string | null; total: number | null } {
-  if (!value || typeof value !== "object") throw new Error("Invalid history");
-  const { events, nextCursor, total } = value as { events?: unknown; nextCursor?: unknown; total?: unknown };
-  if (!Array.isArray(events) || !(nextCursor === null || typeof nextCursor === "string" && nextCursor.length > 0) || !(total === undefined || total === null || typeof total === "number" && Number.isSafeInteger(total) && total >= 0)) throw new Error("Invalid history");
-  const statuses: ProcessingStatus[] = ["already_claimed", "pending", "deferred", "retrying", "processing_paused", "grounding", "post_unavailable", "source_unresolved", "policy_unresolved", "filtering", "blocked", "creative_rejected", "rejected", "generating", "packaging_failed", "ready", "sending", "unresolved", "finalized", "failed"];
-  const rows = events.map((item) => {
-    const post = parseLikedPost(item);
-    const row = item as Partial<EventRow>;
-    if (row.failureReason != null && !["processing_limit", "source_image_unavailable", "image_provider_failed", "image_plan_failed", "image_review_failed", "metadata_failed"].includes(row.failureReason)) throw new Error("Invalid failure reason");
-    if (!post || !isXUserId(row.xUserId) || typeof row.id !== "string" || !(typeof row.intentId === "string" || (row.intentId === null && row.processingStatus === "already_claimed")) || (row.intentId !== null && row.processingStatus === "already_claimed") || typeof row.receivedAt !== "string" || row.status !== "received" || !statuses.includes(row.processingStatus as ProcessingStatus) || typeof row.canForceCreate !== "boolean" || (row.canForceCreate && (!["creative_rejected", "policy_unresolved"].includes(row.processingStatus as string) || typeof row.intentId !== "string")) || !(row.tokenUrl === null || typeof row.tokenUrl === "string") || (row.processingStatus === "finalized" ? !lamports(row.creatorEarningsLamports) : row.creatorEarningsLamports !== null)) throw new Error("Invalid history row");
-    let tokenUrl: string | null = null;
-    if ((row.processingStatus === "finalized" || row.processingStatus === "already_claimed") && row.tokenUrl) {
-      const url = new URL(row.tokenUrl);
-      if (url.protocol !== "https:") throw new Error("Invalid token URL");
-      tokenUrl = url.href;
-    }
-    return { ...post, id: row.id, xUserId: row.xUserId, intentId: row.intentId, receivedAt: row.receivedAt, status: "received" as const, processingStatus: row.processingStatus as ProcessingStatus, ...(row.failureReason !== undefined ? { failureReason: row.failureReason } : {}), canForceCreate: row.canForceCreate, tokenUrl, creatorEarningsLamports: row.creatorEarningsLamports ?? null };
-  });
-  return { events: rows, nextCursor, total: typeof total === "number" ? total : null };
+    if (!value || typeof value !== "object") throw new Error("Invalid history");
+    const { events, nextCursor, total } = value as { events?: unknown; nextCursor?: unknown; total?: unknown };
+    if (!Array.isArray(events) || !(nextCursor === null || typeof nextCursor === "string" && nextCursor.length > 0) || !(total === undefined || total === null || typeof total === "number" && Number.isSafeInteger(total) && total >= 0)) throw new Error("Invalid history");
+    const statuses: ProcessingStatus[] = ["already_claimed", "pending", "deferred", "retrying", "processing_paused", "grounding", "post_unavailable", "source_unresolved", "policy_unresolved", "filtering", "blocked", "creative_rejected", "rejected", "generating", "packaging_failed", "ready", "sending", "unresolved", "finalized", "failed"];
+    const rows = events.map((item) => {
+        const post = parseLikedPost(item);
+        const row = item as Partial<EventRow>;
+        if (row.failureReason != null && !["processing_limit", "source_image_unavailable", "image_provider_failed", "image_plan_failed", "image_review_failed", "metadata_failed"].includes(row.failureReason)) throw new Error("Invalid failure reason");
+        if (!post || !isXUserId(row.xUserId) || typeof row.id !== "string" || !(typeof row.intentId === "string" || (row.intentId === null && row.processingStatus === "already_claimed")) || (row.intentId !== null && row.processingStatus === "already_claimed") || typeof row.receivedAt !== "string" || row.status !== "received" || !statuses.includes(row.processingStatus as ProcessingStatus) || typeof row.canForceCreate !== "boolean" || (row.canForceCreate && (!["creative_rejected", "policy_unresolved"].includes(row.processingStatus as string) || typeof row.intentId !== "string")) || !(row.tokenUrl === null || typeof row.tokenUrl === "string") || (row.processingStatus === "finalized" ? !lamports(row.creatorEarningsLamports) : row.creatorEarningsLamports !== null)) throw new Error("Invalid history row");
+        let tokenUrl: string | null = null;
+        if ((row.processingStatus === "finalized" || row.processingStatus === "already_claimed") && row.tokenUrl) {
+            const url = new URL(row.tokenUrl);
+            if (url.protocol !== "https:") throw new Error("Invalid token URL");
+            tokenUrl = url.href;
+        }
+        return { ...post, id: row.id, xUserId: row.xUserId, intentId: row.intentId, receivedAt: row.receivedAt, status: "received" as const, processingStatus: row.processingStatus as ProcessingStatus, ...(row.failureReason !== undefined ? { failureReason: row.failureReason } : {}), canForceCreate: row.canForceCreate, tokenUrl, creatorEarningsLamports: row.creatorEarningsLamports ?? null };
+    });
+    return { events: rows, nextCursor, total: typeof total === "number" ? total : null };
 }
 
 function lamports(value: unknown): value is string {
-  return typeof value === "string" && /^(0|[1-9][0-9]*)$/.test(value);
+    return typeof value === "string" && /^(0|[1-9][0-9]*)$/.test(value);
 }
 
 export function parseBalances(value: unknown): Balances {
-  if (!value || typeof value !== "object") throw new Error("Invalid balances");
-  const data = value as Partial<Balances>;
-  const validAmounts = (entry: Partial<Balance>) => lamports(entry.availableLamports) && lamports(entry.pendingLamports) && lamports(entry.claimedLamports);
-  if (!Array.isArray(data.accounts) || !data.accounts.every((entry) => entry && isXUserId(entry.xUserId) && validAmounts(entry) && typeof entry.paused === "boolean") || !data.combined || !validAmounts(data.combined) || !data.claimEligibility || typeof data.claimEligibility.available !== "boolean" || !(data.claimEligibility.reason === null || ["below_minimum", "quote_unavailable", "quote_stale", "disputed", "unauthorized"].includes(data.claimEligibility.reason as string)) || !(data.claimEligibility.solUsd === null || typeof data.claimEligibility.solUsd === "string") || !(data.claimEligibility.quoteAt === null || typeof data.claimEligibility.quoteAt === "string")) throw new Error("Invalid balances");
-  return data as Balances;
+    if (!value || typeof value !== "object") throw new Error("Invalid balances");
+    const data = value as Partial<Balances>;
+    const validAmounts = (entry: Partial<Balance>) => lamports(entry.availableLamports) && lamports(entry.pendingLamports) && lamports(entry.claimedLamports);
+    if (!Array.isArray(data.accounts) || !data.accounts.every((entry) => entry && isXUserId(entry.xUserId) && validAmounts(entry) && typeof entry.blocked === "boolean") || !data.combined || !validAmounts(data.combined) || !data.claimEligibility || typeof data.claimEligibility.available !== "boolean" || !(data.claimEligibility.reason === null || ["below_minimum", "quote_unavailable", "quote_stale", "disputed", "x_user_blocked", "unauthorized"].includes(data.claimEligibility.reason as string)) || !(data.claimEligibility.solUsd === null || typeof data.claimEligibility.solUsd === "string") || !(data.claimEligibility.quoteAt === null || typeof data.claimEligibility.quoteAt === "string")) throw new Error("Invalid balances");
+    return { ...data, claimEligibility: { ...data.claimEligibility, reason: (data.claimEligibility.reason as string | null) === "disputed" ? "x_user_blocked" : data.claimEligibility.reason } } as Balances;
 }
 
 export function parseClaim(value: unknown): Claim {
-  if (!value || typeof value !== "object") throw new Error("Invalid claim");
-  const claim = value as Partial<Claim>;
-  if (typeof claim.id !== "string" || !["pending", "held", "confirmed", "failed", "canceled"].includes(claim.status ?? "") || !lamports(claim.amountLamports) || typeof claim.destination !== "string" || !isSolanaAddress(claim.destination) || !(claim.transactionSignature === null || typeof claim.transactionSignature === "string")) throw new Error("Invalid claim");
-  return claim as Claim;
+    if (!value || typeof value !== "object") throw new Error("Invalid claim");
+    const claim = value as Partial<Claim>;
+    if (typeof claim.id !== "string" || !["pending", "held", "confirmed", "failed", "canceled"].includes(claim.status ?? "") || !lamports(claim.amountLamports) || typeof claim.destination !== "string" || !isSolanaAddress(claim.destination) || !(claim.transactionSignature === null || typeof claim.transactionSignature === "string")) throw new Error("Invalid claim");
+    return claim as Claim;
 }
 
 export function parseClaimHistory(value: unknown): { claims: ClaimHistory[]; nextCursor: string | null } {
-  if (!value || typeof value !== "object") throw new Error("Invalid claim history");
-  const { claims, nextCursor } = value as { claims?: unknown; nextCursor?: unknown };
-  if (!Array.isArray(claims) || !(nextCursor === null || typeof nextCursor === "string" && nextCursor.length > 0)) throw new Error("Invalid claim history");
-  return { claims: claims.map((item) => {
-    const claim = parseClaim(item);
-    const createdAt = (item as { createdAt?: unknown }).createdAt;
-    if (typeof createdAt !== "string" || !createdAt || Number.isNaN(Date.parse(createdAt))) throw new Error("Invalid claim date");
-    return { ...claim, createdAt };
-  }), nextCursor };
+    if (!value || typeof value !== "object") throw new Error("Invalid claim history");
+    const { claims, nextCursor } = value as { claims?: unknown; nextCursor?: unknown };
+    if (!Array.isArray(claims) || !(nextCursor === null || typeof nextCursor === "string" && nextCursor.length > 0)) throw new Error("Invalid claim history");
+    return {
+        claims: claims.map((item) => {
+            const claim = parseClaim(item);
+            const createdAt = (item as { createdAt?: unknown }).createdAt;
+            if (typeof createdAt !== "string" || !createdAt || Number.isNaN(Date.parse(createdAt))) throw new Error("Invalid claim date");
+            return { ...claim, createdAt };
+        }), nextCursor
+    };
 }
 
 export function formatSol(value: string): string {
-  const amount = BigInt(value);
-  const whole = amount / 1_000_000_000n;
-  const fraction = (amount % 1_000_000_000n).toString().padStart(9, "0").replace(/0+$/, "");
-  return `${whole}${fraction ? `.${fraction}` : ""} SOL`;
+    const amount = BigInt(value);
+    const whole = amount / 1_000_000_000n;
+    const fraction = (amount % 1_000_000_000n).toString().padStart(9, "0").replace(/0+$/, "");
+    return `${whole}${fraction ? `.${fraction}` : ""} SOL`;
 }
 
 export function formatUsd(lamportAmount: string, solUsd: string | null): string | null {
-  if (!solUsd || !/^\d+(?:\.\d+)?$/.test(solUsd)) return null;
-  const [whole = "0", fraction = ""] = solUsd.split(".");
-  const price = BigInt(whole + fraction);
-  if (price === 0n) return null;
-  const numerator = BigInt(lamportAmount) * price * 100n;
-  const denominator = 1_000_000_000n * 10n ** BigInt(fraction.length);
-  const cents = (numerator + denominator / 2n) / denominator;
-  if (numerator > 0n && cents === 0n) return "<$0.01";
-  return `$${new Intl.NumberFormat("en-US").format(cents / 100n)}.${(cents % 100n).toString().padStart(2, "0")}`;
+    if (!solUsd || !/^\d+(?:\.\d+)?$/.test(solUsd)) return null;
+    const [whole = "0", fraction = ""] = solUsd.split(".");
+    const price = BigInt(whole + fraction);
+    if (price === 0n) return null;
+    const numerator = BigInt(lamportAmount) * price * 100n;
+    const denominator = 1_000_000_000n * 10n ** BigInt(fraction.length);
+    const cents = (numerator + denominator / 2n) / denominator;
+    if (numerator > 0n && cents === 0n) return "<$0.01";
+    return `$${new Intl.NumberFormat("en-US").format(cents / 100n)}.${(cents % 100n).toString().padStart(2, "0")}`;
 }
